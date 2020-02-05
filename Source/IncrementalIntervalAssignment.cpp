@@ -8,10 +8,14 @@
 //   initialize goals to 1, bounds to 1,inf, etc.
 //   int new_row(MRow &Mrow);  convert from MRow to our sparse format
 //   PRINT_INFO, print_flag, put in log instead
-//   verify_full_solution
+//   verify_full_solution, get rid of refentities
 //   get rid of names?! or convert
 //   use a tool to determine code that isn't used and delete it
+//   fill in public interface methods
+//   test functions
 //   organize like methods
+//   cmake
+//   test on a few compilers
 
 #include <numeric>
 
