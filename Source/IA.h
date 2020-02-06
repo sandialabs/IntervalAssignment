@@ -10,10 +10,15 @@
 #include <vector>
 #include <string>
 
-namespace IAInternal
+#include "IAEnums.h"
+
+namespace IIA_Internal
 {
-	class IAImplementation;	
+  class IncrementalIntervalAssignment;
 }
+
+namespace IIA
+{
 
 class IAResult
 {
@@ -122,9 +127,10 @@ public:
 	const IAResult &get_result();
 
 private:
-	IAInternal::IAImplementation *ia;
+  IIA_Internal::IncrementalIntervalAssignment *ia;
 	int free_row;
 
 };
 
+} // namespace
 #endif

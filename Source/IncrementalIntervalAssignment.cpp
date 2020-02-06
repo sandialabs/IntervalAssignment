@@ -2,7 +2,7 @@
 #include "IncrementalIntervalAssignment.h"
 
 // to do
-//   move freeze_problem_size to start of solve, depending on whether solving for the first time or not
+//  x move freeze_problem_size to start of solve, depending on whether solving for the first time or not
 //   data layout for variables with goals and slack variables and sum-even vars... probably fast enough we can just go over all of them and check the goals. maybe need something to mark vars whose column coefficients are 2
 //   sum-even constraint conversion
 //   initialize goals to 1, bounds to 1,inf, etc.
@@ -20,8 +20,10 @@
 #include <numeric>
 
 // math utilities
+namespace IIA_Internal
+{
 
-// greatest common divisor of u and v
+  // greatest common divisor of u and v
 // always returns a positive number, as we take abs of u and v
 int gcd(int u, int v)
 {
@@ -5345,7 +5347,7 @@ int IncrementalIntervalAssignment::new_row(MRow &Mrow)
   return used_row;
 }
 
-void IncrementalIntervalAssignment::freeze_problem_size( int /*is_equality_subprogram*/ )
+void IncrementalIntervalAssignment::freeze_problem_size()
 {
   // zzyk to do: ensure we are told how many there are going to be
   // reserve extra space for dynamic u-sub variables and rows
@@ -5632,7 +5634,7 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
     // generate the upper/lower bounds/goals for the tied-to variables
     if (!generate_tied_data())
     {
-      return CUBIT_FALSE;
+      return false;
     }
 
     // adjust the initial solution for the tied-to variables
@@ -5788,7 +5790,7 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   
   if (!in_bounds)
   {
-    return CUBIT_FALSE;
+    return false;
   }
   
   hasBeenSolved=true; // feasible solution
@@ -5876,6 +5878,8 @@ int IncrementalIntervalAssignment::solve(int create_groups,
   double setup_time=0, map_time(0.);
   if (first_time)
   {
+    freeze_problem_size();
+    
     int num_converted=0;
     for (int r = 0; r <= used_row; ++r)
     {
@@ -5974,7 +5978,7 @@ int IncrementalIntervalAssignment::solve(int create_groups,
   {
     if (!do_pave)
     {
-      success = CUBIT_FALSE;
+      success = false;
     }
     else
     {
@@ -6049,13 +6053,13 @@ int IntervalProblem::solve_map(int create_groups,
   
   // subdivide non-sum-even problems into independent components
   std::vector<IntervalProblem*> sub_problems;
-  subdivide_problem( sub_problems, CUBIT_FALSE, row_min, row_max  );
+  subdivide_problem( sub_problems, false, row_min, row_max  );
   const int num_subs = sub_problems.size();
   
   double solve_time=0.;
   CpuTimer solve_timer;
   
-  int success = CUBIT_TRUE;
+  int success = true;
   for ( int i = num_subs; i--; )
   {
     auto *sub_problem = sub_problems.get_and_step();
@@ -6064,13 +6068,13 @@ int IntervalProblem::solve_map(int create_groups,
     {
       PRINT_DEBUG_121("Mapping subproblem %d of %d:\n",
                       num_subs - i, num_subs);
-      sub_problem->summarize_problem( CUBIT_FALSE, CUBIT_TRUE );
+      sub_problem->summarize_problem( false, true );
     }
     if ( !report_only )
     {
       if (sub_problem->solve_sub( create_infeasible_groups) != CUBIT_SUCCESS)
       {
-        success = CUBIT_FALSE;
+        success = false;
         if (printFlag)
         {
           PRINT_WARNING("Mapping subproblem %d of %d was infeasible.\n",
@@ -6116,10 +6120,10 @@ int IntervalProblem::solve_even(int create_groups,
   // subdivide based on sum-even constraints.
   // Some equality constraints may not be used
   std::vector<IntervalProblem*> sub_problems;
-  subdivide_problem( sub_problems, CUBIT_TRUE, row_min, row_max );
+  subdivide_problem( sub_problems, true, row_min, row_max );
   const int num_subs = sub_problems.size();
   
-  int success = CUBIT_TRUE;
+  int success = true;
   for ( int i = sub_problems.size(); i--; )
   {
     auto *sub_problem = sub_problems.get_and_step();
@@ -6127,12 +6131,12 @@ int IntervalProblem::solve_even(int create_groups,
     if ( create_groups ) {
       PRINT_DEBUG_121("Sum-even (Paving) subproblem %d of %d:\n",
                       num_subs - i, num_subs);
-      sub_problem->summarize_problem( CUBIT_FALSE, CUBIT_TRUE );
+      sub_problem->summarize_problem( false, true );
     }
     if ( !report_only ) {
       if ( sub_problem->solve_sub_even() == CUBIT_FAILURE )
       {
-        success = CUBIT_FALSE;
+        success = false;
         // create a group for the infeasible subproblem
         if (printFlag)
           PRINT_WARNING("Interval Matching subproblem is infeasible\n");
@@ -6443,7 +6447,7 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
   assert( !sub_cols.is_in_list( int_var_column+1 ) ); //no side-effects
   assert( !sub_col_array[ int_var_column ] );
   sub_cols.append( int_var_column+1 );
-  sub_col_array[ int_var_column ] = CUBIT_TRUE;
+  sub_col_array[ int_var_column ] = true;
 
   auto &non_zeros = col_rows[int_var_column];
   int row, cross_column;
@@ -6455,15 +6459,15 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
       auto &row_non_zeros = rows[row].cols;
 
         // should we add this row?
-      int do_add = CUBIT_FALSE;
+      int do_add = false;
       if ( do_sum_even ) 
       {
-        do_add = CUBIT_TRUE;
+        do_add = true;
       }
       else {
 
           // is the row a sum-even row?
-        int has_sum_even_var = CUBIT_FALSE;
+        int has_sum_even_var = false;
         row_non_zeros.last();
         {
           for ( int j = row_non_zeros.size(); j--; ) {
@@ -6472,7 +6476,7 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
                  cross_column < num_int_vars() + sumEvenDummies )
             {
               PRINT_DEBUG(47,"IntervalProblem::recursively_add_edge: column %d is a sum-even because it's index is in [%d,%d), so skipping row %d.\n", cross_column,num_int_vars(),num_int_vars() + sumEvenDummies, row );
-              has_sum_even_var = CUBIT_TRUE;
+              has_sum_even_var = true;
               break;
             }
           }
@@ -6480,7 +6484,7 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
           // and if is an equality constraint row
         if ( !has_sum_even_var ) 
         {
-          do_add = CUBIT_TRUE;
+          do_add = true;
         }
       }
       
@@ -6536,14 +6540,14 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
             // Below: can skip the row on the bet that intervals won't decrease by more than a factor of 2.
             abs(expected_edge_count) <= 2*abs(sum_even_min) )
         {
-          do_add = CUBIT_TRUE;
+          do_add = true;
         }
       }
       
       // add row to sub problem
       if ( do_add ) {
         sub_rows.append( row+1 );
-        sub_row_array[ row ] = CUBIT_TRUE;
+        sub_row_array[ row ] = true;
         
           // recursively add cross-columns
         for ( int k = row_non_zeros.size(); k--; )
@@ -6722,7 +6726,7 @@ void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_probl
       int sub_edges = sub_problem->num_int_vars();
       sub_problem->lastCopiedCol = sub_edges + sub_problem->numDummies;
 
-      sub_problem->freeze_problem_size( !do_sum_even );
+      sub_problem->freeze_problem_size();
       
         // title, for debugging
       if (names_exist())
@@ -7167,3 +7171,5 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
   }
   return rc;
 }
+
+} // namespace

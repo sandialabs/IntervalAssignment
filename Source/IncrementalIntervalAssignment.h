@@ -15,10 +15,22 @@
 #include <map>
 #include <queue>
 #include <limits>
+#include <string>
 
-// namespace IIA
-// {
+using std::vector;
+using std::set;
+using std::map;
+using std::priority_queue;
+using std::numeric_limits;
+using std::string;
 
+#include "IAEnums.h"
+
+namespace IIA_Internal
+{
+
+  using IIA::ConstraintType;
+  
 // column, <negative blocking coeff, positive blocking coeff>
 // many map entries are undefined
 // if negative is -1 and positive is +1, then we can't change the variable at all
@@ -135,7 +147,7 @@ public:
 struct EqualsB
 {
   std::vector<int>rhs;
-  std::vector<CubitConstraintType>constraint;
+  std::vector<ConstraintType>constraint;
 };
 
 class IncrementalIntervalAssignment : 
@@ -167,7 +179,7 @@ protected:
   // my row x is parentProblem's row parentRows[x]
 
   std::vector<int> parentCols;
-  std::vector<TDILPIntegerVariable*> intVars;
+  // std::vector<TDILPIntegerVariable*> intVars;
     int numSoftEdges=0;
   //- number of edges figuring into objective function
   
@@ -183,13 +195,6 @@ protected:
   //- sum(I(e)) = even constraints.
   
   int usedDummies=0;
-  
-  // default column layout: intVars, then non-sumEven dummies, then sumEven dummies
-  size_t sumEvenDummies_start() {return num_int_vars() + (numDummies - sumEvenDummies);}
-  // columns are laid out:
-  //   LP: intVars, then delta-dummies for min-max delta
-  //   LP: intVars, then sumEven dummies for sum-even problems
-  //   LPsub: intVars, then parent Dummies, then deltas/sumEvens
   
   int num_dummies();
   //- number of dummy variables in the IncrementalIntervalAssignment, for e.g. evenality constraints
@@ -207,10 +212,8 @@ protected:
   //   Typical usage is for enforcing submap non-overlap "U" constraints, because there are two constraints we could add,
   //   and which one is best is not determined until we have a rough solution.
   // Return the index of the row
-  int new_row(MRow &Mrow);
+  // int new_row(MRow &Mrow);
   
-  virtual int set_row_is_sum_even(int row, MRefEntity *ref_entity, double dummy_coeff, double dummy_bound) = 0;
-
   void print_associated_int_vars();
 
   int num_int_vars() { return intVars.size(); }
@@ -248,7 +251,7 @@ private:
 
   //   if row_min and row_max are passed in, then we generate subproblems involving those rows and ignore ones not containing those rows.
   void subdivide_problem( std::vector<IncrementalIntervalAssignment*> &sub_problems,
-                          int do_sum_even = CUBIT_FALSE, int row_min = -1, int row_max = -1 );
+                          bool do_sum_even = false, int row_min = -1, int row_max = -1 );
   //- Subdivide the equality (sum-even) constraints of this IncrementalIntervalAssignment into
   //- independent sub-problems, if do_sum_even is false (true).
 
@@ -280,7 +283,7 @@ protected: // methods
   // this
   // size_t nonevenDummies_start() {return (size_t) intVars.size()+sumEvenDummies;}
   // size_t nonevenDummies_end()   {return (size_t) intVars.size()+sumEvenDummies+usedDummies;} // or numDummies
-  size_t sumEvenDummies_start() override {return (size_t) intVars.size();}
+  size_t sumEvenDummies_start() {return (size_t) intVars.size();}
   size_t sumEvenDummies_end()   {return (size_t) intVars.size()+sumEvenDummies;}
   //
   // not this
@@ -432,14 +435,14 @@ protected:
     
 public:
 
-  IncrementalIntervalAssignment( int print_flag );
+  IncrementalIntervalAssignment( bool print_flag = false );
   virtual ~IncrementalIntervalAssignment();  
   
   static void initialize_settings();
   // Tie global parameters to the UI
 
   void print_problem_summary(std::string prefix);
-  void print_problem(std::string prefix) override;
+  void print_problem(std::string prefix);
   void print_problem(std::string prefix, const std::vector<int> &col_order);
   void print_solution(std::string prefix);
   void print_solution_row(int r, std::string prefix="");
@@ -449,22 +452,22 @@ public:
   void dump_var(int c); // print debug info about the column and rows containing that column
   //- Debug. Print out the lp.
 
-  virtual void freeze_problem_size( int /*is_equality_subprogram*/ ) override;
+  void freeze_problem_size();
   void add_more_columns();
   void add_more_rows();
 
 
-  int next_available_row( CubitConstraintType constraint_type);
+  int next_available_row( ConstraintType constraint_type);
 
-  virtual int set_row_is_sum_even(int row, MRefEntity *ref_entity, double dummy_coeff, double dummy_bound) override;
+  // int set_row_is_sum_even(int row, MRefEntity *ref_entity, double dummy_coeff, double dummy_bound);
 
   int solve( int create_groups, int report_flag, int scheme_flag, bool first_time );
 
   // return true if a row is something like "0 = 3" or some other obviously bad constraint
   bool infeasible_constraints();
 
-  int get_is_solved() override {return hasBeenSolved;}
-  void set_is_unsolved() override {hasBeenSolved=false;}
+  int get_is_solved() {return hasBeenSolved;}
+  void set_is_unsolved() {hasBeenSolved=false;}
 
 
   //- returns the index = column of the first variable (if num_variables>1, rest are consecutive.
@@ -721,7 +724,7 @@ protected:
     // debug
     void print();
     
-    int size() {return Q.size();}
+    size_t size() {return Q.size();}
     
   private:
     std::map<int,QElement> elements;
@@ -765,7 +768,7 @@ protected:
 };
 
 inline
-IncrementalIntervalAssignment::IncrementalIntervalAssignment( int print_flag ) :
+IncrementalIntervalAssignment::IncrementalIntervalAssignment( bool print_flag ) : printFlag(print_flag)
 {
 }
 
@@ -777,6 +780,6 @@ IncrementalIntervalAssignment* IncrementalIntervalAssignment::new_sub_problem( i
   return np;
 }
 
-// }
+}
 
 #endif  // INCREMENTALINTERVALASSIGNMENT_HPP

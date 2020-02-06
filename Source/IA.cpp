@@ -1,26 +1,29 @@
 // IA.cpp
 
 #include "IA.h"
-#include "IAImplementation.h"
+#include "IncrementalIntervalAssignment.h"
 #include <limits>
 
-
-IAResult::IAResult() : 
-solved(false), 
-constraints_satisfied(false), 
-bounds_satisfied(false), 
-optimized(false), 
-error(false)
-{}
-
-IAResult::IAResult() : ia( new IAImplementation()), free_row(0)
-{}
-
-virtual ~IAResult()
+namespace IIA
 {
-	delete IAImplementation;
-	IAImplementation = nullptr;
+  using IIA_Internal::IncrementalIntervalAssignment;
+  
+  IAResult::IAResult() :
+  solved(false),
+  constraints_satisfied(false),
+  bounds_satisfied(false),
+  optimized(false),
+  error(false)
+  {}
+  
+  IA::IA() : ia( new IncrementalIntervalAssignment()), free_row(0)
+  {}
+  
+  IA::~IA()
+  {
+    delete ia;
+    ia = nullptr;
+  }
+  
 }
-
-
 
