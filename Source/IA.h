@@ -67,7 +67,7 @@ public:
 	// A
 	int next_row(); // optional, returns index of next unused row 0..	
 	// swaps vectors with current contents, doesn't make a copy
-	void set_row(int row, std::vec<int> &cols, std::vec<int> &vals);
+	void set_row(int row, std::vector<int> &cols, std::vector<int> &vals);
 	void set_row_col(int row, int col, int val); // A(row,col) = val
 	// =
 	void set_constraint(int row, ConstraintType constraint_type);
@@ -95,9 +95,9 @@ public:
     //   goals default to 1.
 
 	// get versions of the set methods
-	void get_row(int row, const std::vec<int> &cols, const std::vec<int> &vals);
+	void get_row(int row, const std::vector<int> &cols, const std::vector<int> &vals);
 	int get_row_col(int row, int col);
-	ConstraintType void get_constraint(int row);
+	ConstraintType get_constraint(int row);
 	int get_rhs(int row);
 	void get_bounds(int col, int &lo, int &hi); 
 	int get_bound_lo(int col);

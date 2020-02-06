@@ -64,7 +64,7 @@ void test_problem_1()
 
 }
 
-main
+int main(int argc, const char * argv[])
 {
 
 	test_problem_1();

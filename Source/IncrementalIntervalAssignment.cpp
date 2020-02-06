@@ -1,5 +1,5 @@
 //- file IncrementalIntervalAssignment.cpp
-#include "IncrementalIntervalAssignment.hpp"
+#include "IncrementalIntervalAssignment.h"
 
 // to do
 //   move freeze_problem_size to start of solve, depending on whether solving for the first time or not
