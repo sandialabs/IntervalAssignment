@@ -1,8 +1,6 @@
-//- Class: IntervalAssignmentImplementation
+//- Class: IncrementalIntervalAssignment
 //- Owner: Scott Mitchell
-//- Description: This is for setting up and solving interval assigment
-//-              linear programs. In particular, this class keeps track
-//-              of ties between MRefEdges and the linear program.
+//- Description: Implementation of setting up and solving interval assigment.
 //- Checked By: 
 //- Version: $Id:
 
@@ -26,9 +24,14 @@ using std::string;
 
 #include "IAEnums.h"
 
+namespace IIA
+{
+  class IAResult;
+}
+
 namespace IIA_Internal
 {
-
+  using IIA::IAResult;
   using IIA::ConstraintType;
   
 // column, <negative blocking coeff, positive blocking coeff>
@@ -164,13 +167,12 @@ protected: // data
   // bounds are in [ std::numeric_limits<int>::lowest(), std::numeric_limits<int>::max() ]
 
   // names for debugging only. Usually these aren't assigned so incur minimal overhead
+  bool names_exist();
   std::vector<std::string> row_names, col_names;
   std::string problem_name;
 
 // from IntervalProblem
 protected:
-
-  bool printFlag=false;
 
   IncrementalIntervalAssignment *parentProblem=nullptr;
   // the problem I'm a subproblem of
@@ -255,7 +257,7 @@ private:
   //- Subdivide the equality (sum-even) constraints of this IncrementalIntervalAssignment into
   //- independent sub-problems, if do_sum_even is false (true).
 
-  IncrementalIntervalAssignment* new_sub_problem( int printFlag );
+  IncrementalIntervalAssignment* new_sub_problem();
   void delete_subproblems( std::vector<IncrementalIntervalAssignment*> &sub_problems );
 
   //- gather the solutions of the sub-problems into this problem
@@ -435,8 +437,10 @@ protected:
     
 public:
 
-  IncrementalIntervalAssignment( bool print_flag = false );
+  IncrementalIntervalAssignment( IAResult *result_ptr = nullptr );
   virtual ~IncrementalIntervalAssignment();  
+  
+  IAResult *result=nullptr;
   
   static void initialize_settings();
   // Tie global parameters to the UI
@@ -478,7 +482,9 @@ public:
   int   get_M( int row, int col );
   void  set_M( int row, int col, int val ); // used?
     
-    
+  double set_goal(int c, double goal);
+  void set_no_goal(int c);
+  
 protected:
   
   // for the tied-to columns we keep this
@@ -765,17 +771,28 @@ protected:
   // true if A<B by lexicographic min max
   bool is_better( std::vector<QElement> &qA, std::vector<QElement> &qB);
 
+  
+  // io
+public:
+  enum MessageType {DEBUG_MSG, INFO_MSG, WARNING_MSG, ERROR_MSG };
+  void log_message(MessageType message_type, const char* format, ...);
+protected:
+  void print_vec(const std::vector<int> &vec, bool lf = true);
+  void print_vec(const std::vector< std::pair<int,int> > &vec);
+  void print_set(const std::set< std::pair<int,int> > &aset);
+  void print_map(const BlockingCols &amap);
+  void print_map(const std::map<int,int> &amap);
 };
 
 inline
-IncrementalIntervalAssignment::IncrementalIntervalAssignment( bool print_flag ) : printFlag(print_flag)
+IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResult *result_ptr ) : result(result_ptr)
 {
 }
 
 inline
-IncrementalIntervalAssignment* IncrementalIntervalAssignment::new_sub_problem( int printFlag )
+IncrementalIntervalAssignment* IncrementalIntervalAssignment::new_sub_problem()
 {
-  auto np = new IncrementalIntervalAssignment(printFlag);
+  auto np = new IncrementalIntervalAssignment(result);
   np->should_adjust_solution_tied_variables = should_adjust_solution_tied_variables;
   return np;
 }

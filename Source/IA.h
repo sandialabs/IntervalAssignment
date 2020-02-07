@@ -11,6 +11,7 @@
 #include <string>
 
 #include "IAEnums.h"
+#include "IAResult.h"
 
 namespace IIA_Internal
 {
@@ -19,22 +20,7 @@ namespace IIA_Internal
 
 namespace IIA
 {
-
-class IAResult
-{
-public:
-	IAResult();
-	virtual ~IAResult();
-
-	bool solved;
-	bool constraints_satisfied;
-	bool bounds_satisfied;
-	bool optimized;
-	bool error;
-	int log_start; // first index of log entries for latest method call
-	std::vector<std::string> log;
-};
-
+  
 class IA
 {	
 public:
@@ -100,15 +86,15 @@ public:
     //   goals default to 1.
 
 	// get versions of the set methods
-	void get_row(int row, const std::vector<int> &cols, const std::vector<int> &vals);
-	int get_row_col(int row, int col);
-	ConstraintType get_constraint(int row);
-	int get_rhs(int row);
-	void get_bounds(int col, int &lo, int &hi); 
-	int get_bound_lo(int col);
-	int get_bound_hi(int col);
-	bool has_goal(int col);
-	double get_goal(int col);
+	void get_row(int row, const std::vector<int> &cols, const std::vector<int> &vals) const;
+	int get_row_col(int row, int col) const;
+	ConstraintType get_constraint(int row) const;
+	int get_rhs(int row) const;
+	void get_bounds(int col, int &lo, int &hi) const;
+	int get_bound_lo(int col) const;
+	int get_bound_hi(int col) const;
+	bool has_goal(int col) const;
+	double get_goal(int col) const;
 
 	//== Solve
 
@@ -120,17 +106,21 @@ public:
 	// Instead, (equality) rows are added with slack variables whose current value is out of bounds.
 	// To get everything in bounds, call solve.
 
-	int get_solution(int col);
-	const std::vector<int> &get_solution();
+	int get_solution(int col) const;
+	const std::vector<int> &get_solution() const;
 
+  // can set which types of messages are logged
 	// can check this for "error" after each operation
-	const IAResult &get_result();
+  // see IAResult.h for details
+	const IAResult &get_result() const;
 
 private:
   IIA_Internal::IncrementalIntervalAssignment *ia;
 	int free_row;
-
+  IAResult result;
 };
+
+#include "IAInline.h"
 
 } // namespace
 #endif

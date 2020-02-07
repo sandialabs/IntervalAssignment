@@ -7,16 +7,9 @@
 namespace IIA
 {
   using IIA_Internal::IncrementalIntervalAssignment;
-  
-  IAResult::IAResult() :
-  solved(false),
-  constraints_satisfied(false),
-  bounds_satisfied(false),
-  optimized(false),
-  error(false)
-  {}
-  
-  IA::IA() : ia( new IncrementalIntervalAssignment()), free_row(0)
+
+  // can't be inline because we need the non-stubbed version of IncrementalIntervalAssignment
+  IA::IA() : ia( new IncrementalIntervalAssignment(&result)), free_row(0)
   {}
   
   IA::~IA()
@@ -24,6 +17,5 @@ namespace IIA
     delete ia;
     ia = nullptr;
   }
-  
 }
 
