@@ -24,16 +24,11 @@ using std::string;
 
 #include "IAEnums.h"
 
-namespace IIA
-{
-  class IAResult;
-}
-
 namespace IIA_Internal
 {
-  using IIA::IAResult;
   using IIA::ConstraintType;
-  
+  class IAResultImplementation;
+
 // column, <negative blocking coeff, positive blocking coeff>
 // many map entries are undefined
 // if negative is -1 and positive is +1, then we can't change the variable at all
@@ -50,7 +45,7 @@ struct RowSparseInt
   RowSparseInt(std::vector<int> &&c, std::vector<int> &&v) : cols(c), vals(v) {}
   RowSparseInt(const RowSparseInt &copy) : cols(copy.cols), vals(copy.vals) {}
 
-  void print_row() const;
+  void print_row(IAResultImplementation *result) const;
   int get_val(int c) const; // return the value of the row in column c
   int get_col_index(int c) const; // return the index of c in cols
   void sort(); // sort by increasing column index. Also updates the vals.
@@ -112,6 +107,9 @@ private:
 protected:
   std::vector<int> kill_rows; 
 
+  IAResultImplementation *result;
+  void print_map(const BlockingCols &amap);
+  
 public:
 
   // swap rows, update columns
@@ -145,7 +143,7 @@ public:
   void copy(MatrixSparseInt&M,int MaxMRow);
   // copy constructor
   MatrixSparseInt(MatrixSparseInt&M,int MaxMRow);
-  MatrixSparseInt(){}
+  MatrixSparseInt(IAResultImplementation *result_ptr) : result(result_ptr){}
 };
 struct EqualsB
 {
@@ -165,11 +163,24 @@ protected: // data
   std::vector<int> col_lower_bounds, col_upper_bounds, col_solution;
   std::vector<double> goals;
   // bounds are in [ std::numeric_limits<int>::lowest(), std::numeric_limits<int>::max() ]
+  // goals are in (0,std::numeric_limits<int>::max())
+  std::vector<short> variable_type;
+  // 0 is user-variable with a goal
+  // 1 is a dummy variable, say a slack variable, or a user-varaible with no goal
+  // 2 is a dummy variable with |coeff| != 1
 
   // names for debugging only. Usually these aren't assigned so incur minimal overhead
   bool names_exist();
   std::vector<std::string> row_names, col_names;
   std::string problem_name;
+
+public:
+  void set_problem_name( const char *problem_name );
+  void set_row_name(int row, const char *name);
+  void set_col_name(int col, const char *name);
+  const char *get_problem_name();
+  const char *get_row_name(int row);
+  const char *get_col_name(int col);
 
 // from IntervalProblem
 protected:
@@ -205,8 +216,8 @@ protected:
   //   map means solve everything except the sum-even constraints (possibly return a non-integer solution)
   //   even means solve all constraints, return an integer solution
   //   if row_min and row_max are passed in, then we only try to solve the subproblems involving those rows and ignore ones not containing those rows.
-  int solve_map (int create_groups, int report_only, int create_infeasible_groups, int do_map, int do_pave, int row_min = -1, int row_max = -1 );
-  int solve_even(int create_groups, int report_only, int create_infeasible_groups, int do_map, int do_pave, int row_min = -1, int row_max = -1 );
+  bool solve_map (int create_groups, int report_only, int create_infeasible_groups, int do_map, int do_pave, int row_min = -1, int row_max = -1 );
+  bool solve_even(int create_groups, int report_only, int create_infeasible_groups, int do_map, int do_pave, int row_min = -1, int row_max = -1 );
 
   // protected virtual methods
 protected:
@@ -216,19 +227,12 @@ protected:
   // Return the index of the row
   // int new_row(MRow &Mrow);
   
-  void print_associated_int_vars();
-
-  int num_int_vars() { return intVars.size(); }
-  //- number of TDILPIntegerVariables associated with this LP
-  
   int add_dummy_variable(int num_variables, bool is_sum_even );
   //- add one or more dummy variables to the LP. Before freeze_size.
   
   int next_dummy();
   //- return next unused dummy variable. Use after freeze_size.
   //- Make sure all of the sum-even dummies are obtained first.
-
-
 
 public:
   int parent_col(int c) {return parentCols[c];}
@@ -305,8 +309,8 @@ protected: // methods
   // sort each row's vector of cols and vals, by increasing cols (column index)
   void sort_rows();
 
-  void print_rowIIA(size_t r);
-  void print_colIIA(size_t c);
+  void print_row_iia(size_t r);
+  void print_col_iia(size_t c);
 
   
   // HNF Hermite Normal Form. Like RREF but using column operations. For solving initial constraints
@@ -437,10 +441,8 @@ protected:
     
 public:
 
-  IncrementalIntervalAssignment( IAResult *result_ptr = nullptr );
+  IncrementalIntervalAssignment( IAResultImplementation *result_ptr );
   virtual ~IncrementalIntervalAssignment();  
-  
-  IAResult *result=nullptr;
   
   static void initialize_settings();
   // Tie global parameters to the UI
@@ -462,10 +464,12 @@ public:
 
 
   int next_available_row( ConstraintType constraint_type);
+  void set_constraint(int row, ConstraintType constraint_type) {constraint[row]=constraint_type;}
+  ConstraintType get_constraint(int row) {return constraint[row];}
 
-  // int set_row_is_sum_even(int row, MRefEntity *ref_entity, double dummy_coeff, double dummy_bound);
+  // int set_row_is_sum_even(int row, MRefEntity *ref_entity, int dummy_coeff, int dummy_bound);
 
-  int solve( int create_groups, int report_flag, int scheme_flag, bool first_time );
+  bool solve( int create_groups, int report_flag, int scheme_flag, bool first_time );
 
   // return true if a row is something like "0 = 3" or some other obviously bad constraint
   bool infeasible_constraints();
@@ -474,17 +478,41 @@ public:
   void set_is_unsolved() {hasBeenSolved=false;}
 
 
-  //- returns the index = column of the first variable (if num_variables>1, rest are consecutive.
+  // keeps track of how many rows and columns we will allocate when we freeze size
+  //- returns the index = column of the first variable/constraint, the rest are consecutive.
   int add_variable( int num_variables ); 
-  //- returns the row of the first constraint. (if num_constraints>1, rest are consecutive.)
   int add_constraint( int num_constraints );
+  void reserve_cols( int num_cols );
+  void reserve_rows( int num_rows );
+  void resize_cols( int num_cols );
+  void resize_rows( int num_rows );
+  int num_rows() const {return number_of_rows;}
+  int num_cols() const {return number_of_cols;}
 
-  int   get_M( int row, int col );
-  void  set_M( int row, int col, int val ); // used?
-    
+  // used by callers only,
+  int   get_M( int row, int col );  // caution: relies on entries being sorted, be careful when we allow queries
+  void  get_M( int row, const std::vector<int> *&cols, const std::vector<int> *&vals );
+  void  set_M( int row, int col, int val ); // doesn't rely on entries being sorted, may be slow
+  void  set_M( int row,  std::vector<int> &cols, std::vector<int> &vals ); // modifes rows and cols
+
+  int  get_B( int row );
+  void set_B( int row, int val );
+
   double set_goal(int c, double goal);
   void set_no_goal(int c);
+  double get_goal(int c); // no goal is internally represented by 0.
   
+  // to set no bounds
+  //   set_lower( c, std::numeric_limits<int>::lowest() );
+  //   set_upper( c, std::numeric_limits<int>::max() );
+  void set_lower ( int col, int bound ) {col_lower_bounds[col]=bound;}
+  void set_upper ( int col, int bound ) {col_upper_bounds[col]=bound;}
+  int get_lower ( int col ) const {return col_lower_bounds[col];}
+  int get_upper ( int col ) const {return col_upper_bounds[col];}
+
+  int get_solution( int col ) { return col_solution[col]; }
+  const std::vector<int> &get_solution() const { return col_solution; }
+
 protected:
   
   // for the tied-to columns we keep this
@@ -576,7 +604,7 @@ public: // public so MatrixSparseInt can use it
       // ( value == rhs.value   && valueB == rhs.valueB   && valueC == rhs.valueC   && valueD == rhs.valueD && valueE < rhs.valueE);
     }
 
-    void print();
+    void print(IncrementalIntervalAssignment *iia);
   };
   
   // ensure elements are unique if they refer to a different column
@@ -613,14 +641,14 @@ protected:
   public:
     // sets values based on current IIA.col_solution
     //   updates solution and returns true if solution has changed or was unset
-    bool update_values(IncrementalIntervalAssignment &IIA, QElement &qe);
-    // sets values based on current IIA.col_solution
-    void set_values(IncrementalIntervalAssignment &IIA, QElement &qe);
-    // uses the passed in solution instead of IIA's solution
-    void set_values(IncrementalIntervalAssignment &IIA, QElement &qe, int solution);
+    bool update_values(IncrementalIntervalAssignment &iia, QElement &qe);
+    // sets values based on current iia.col_solution
+    void set_values(IncrementalIntervalAssignment &iia, QElement &qe);
+    // uses the passed in solution instead of iia's solution
+    void set_values(IncrementalIntervalAssignment &iia, QElement &qe, int solution);
   protected:
     // assumes qe.solution is already set, uses that instead of col_solution
-    virtual void set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe ) = 0;
+    virtual void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) = 0;
     // virtual void print( const QElement &qe );
   };
   // specializations set the values based on differing criteria
@@ -634,9 +662,9 @@ protected:
   public:
     SetValuesRatioR() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe ) override;
+    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
   private:
-    void set_values_goal(IncrementalIntervalAssignment &IIA, double g, QElement &qe );
+    void set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe );
   };
 
   // ratio  current/goal     for current>goal
@@ -646,8 +674,8 @@ protected:
   public:
     SetValuesRatio() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe ) override;
-    void set_values_goal(IncrementalIntervalAssignment &IIA, double g, QElement &qe );
+    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
+    void set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe );
   };
   
   class SetValuesBounds: public SetValuesFn
@@ -655,7 +683,7 @@ protected:
   public:
     SetValuesBounds() {}
   protected:
-    void set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe ) override;
+    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
   // also want a queue element for a constraint?
   
@@ -665,7 +693,7 @@ protected:
   public:
     SetValuesOneCoeff() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe ) override;
+    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
 
   // in order of increasing number of coefficients = number of rows the variable appears in
@@ -674,7 +702,7 @@ protected:
   public:
     SetValuesNumCoeff() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe ) override;
+    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
 
   
@@ -684,7 +712,7 @@ protected:
   public:
     SetValuesCoeffRowsGoal() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe ) override;
+    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
 
 
@@ -712,8 +740,8 @@ protected:
   {
   public:
     
-    QWithReplacement(IncrementalIntervalAssignment *IIA_in, SetValuesFn &f, double f_threshold)
-    : val_fn(&f), threshold(f_threshold), IIA(IIA_in) {}
+    QWithReplacement(IncrementalIntervalAssignment *iia_in, SetValuesFn &f, double f_threshold)
+    : val_fn(&f), threshold(f_threshold), iia(iia_in) {}
 
     void build(const std::vector<int> &cols);
 
@@ -737,7 +765,7 @@ protected:
     std::set<QElement,QElement_less_for_sets> Q;
     SetValuesFn *val_fn = nullptr;
     double threshold = 0.0;
-    IncrementalIntervalAssignment *IIA = nullptr;
+    IncrementalIntervalAssignment *iia = nullptr;
     
     // conditionally add a q element for column c
     void add(int c);
@@ -771,21 +799,10 @@ protected:
   // true if A<B by lexicographic min max
   bool is_better( std::vector<QElement> &qA, std::vector<QElement> &qB);
 
-  
-  // io
-public:
-  enum MessageType {DEBUG_MSG, INFO_MSG, WARNING_MSG, ERROR_MSG };
-  void log_message(MessageType message_type, const char* format, ...);
-protected:
-  void print_vec(const std::vector<int> &vec, bool lf = true);
-  void print_vec(const std::vector< std::pair<int,int> > &vec);
-  void print_set(const std::set< std::pair<int,int> > &aset);
-  void print_map(const BlockingCols &amap);
-  void print_map(const std::map<int,int> &amap);
 };
 
 inline
-IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResult *result_ptr ) : result(result_ptr)
+IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr)
 {
 }
 
@@ -797,6 +814,18 @@ IncrementalIntervalAssignment* IncrementalIntervalAssignment::new_sub_problem()
   return np;
 }
 
+inline
+int IncrementalIntervalAssignment::get_B( int row )
+{
+  return rhs[row];
 }
+
+inline
+void IncrementalIntervalAssignment::set_B( int row, int val )
+{
+  rhs[row] = val;
+}
+
+} // namespace
 
 #endif  // INCREMENTALINTERVALASSIGNMENT_HPP

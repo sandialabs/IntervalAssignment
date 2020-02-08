@@ -5,7 +5,7 @@
 using IIA_Internal::IncrementalIntervalAssignment;
 
 inline
-const IAResult &IA::get_result() const
+const IAResult *IA::get_result() const
 {
   return result;
 }

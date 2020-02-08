@@ -9,6 +9,9 @@
 /* Begin PBXBuildFile section */
 		D243C80C23EB92B700F3C7BF /* IA.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C80623EB92B700F3C7BF /* IA.cpp */; };
 		D243C80D23EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C80823EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp */; };
+		D243C81323ECEC7E00F3C7BF /* IAResult.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81223ECEC7E00F3C7BF /* IAResult.cpp */; };
+		D243C81623EE465200F3C7BF /* CpuTimer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81523EE465200F3C7BF /* CpuTimer.cpp */; };
+		D243C81923EE47F000F3C7BF /* IAResultImplementation.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -30,6 +33,14 @@
 		D243C80723EB92B700F3C7BF /* IA.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IA.h; path = ../../Source/IA.h; sourceTree = "<group>"; };
 		D243C80823EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IncrementalIntervalAssignment.cpp; path = ../../Source/IncrementalIntervalAssignment.cpp; sourceTree = "<group>"; };
 		D243C80B23EB92B700F3C7BF /* IncrementalIntervalAssignment.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IncrementalIntervalAssignment.h; path = ../../Source/IncrementalIntervalAssignment.h; sourceTree = "<group>"; };
+		D243C80F23ECB6E900F3C7BF /* IAInline.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAInline.h; path = ../../Source/IAInline.h; sourceTree = "<group>"; };
+		D243C81023ECB6FA00F3C7BF /* IAEnums.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAEnums.h; path = ../../Source/IAEnums.h; sourceTree = "<group>"; };
+		D243C81123ECEA9F00F3C7BF /* IAResult.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAResult.h; path = ../../Source/IAResult.h; sourceTree = "<group>"; };
+		D243C81223ECEC7E00F3C7BF /* IAResult.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IAResult.cpp; path = ../../Source/IAResult.cpp; sourceTree = "<group>"; };
+		D243C81423EE465200F3C7BF /* CpuTimer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = CpuTimer.h; path = ../../Source/CpuTimer.h; sourceTree = "<group>"; };
+		D243C81523EE465200F3C7BF /* CpuTimer.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = CpuTimer.cpp; path = ../../Source/CpuTimer.cpp; sourceTree = "<group>"; };
+		D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IAResultImplementation.cpp; path = ../../Source/IAResultImplementation.cpp; sourceTree = "<group>"; };
+		D243C81823EE47EF00F3C7BF /* IAResultImplementation.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAResultImplementation.h; path = ../../Source/IAResultImplementation.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,6 +73,14 @@
 		D243C7FD23EB929800F3C7BF /* IntervalAssignment-xcode */ = {
 			isa = PBXGroup;
 			children = (
+				D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */,
+				D243C81823EE47EF00F3C7BF /* IAResultImplementation.h */,
+				D243C81523EE465200F3C7BF /* CpuTimer.cpp */,
+				D243C81423EE465200F3C7BF /* CpuTimer.h */,
+				D243C81223ECEC7E00F3C7BF /* IAResult.cpp */,
+				D243C81123ECEA9F00F3C7BF /* IAResult.h */,
+				D243C81023ECB6FA00F3C7BF /* IAEnums.h */,
+				D243C80F23ECB6E900F3C7BF /* IAInline.h */,
 				D243C80623EB92B700F3C7BF /* IA.cpp */,
 				D243C80723EB92B700F3C7BF /* IA.h */,
 				D243C80823EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp */,
@@ -129,6 +148,9 @@
 			files = (
 				D243C80C23EB92B700F3C7BF /* IA.cpp in Sources */,
 				D243C80D23EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp in Sources */,
+				D243C81623EE465200F3C7BF /* CpuTimer.cpp in Sources */,
+				D243C81323ECEC7E00F3C7BF /* IAResult.cpp in Sources */,
+				D243C81923EE47F000F3C7BF /* IAResultImplementation.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

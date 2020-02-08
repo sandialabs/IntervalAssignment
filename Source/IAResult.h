@@ -16,13 +16,17 @@ namespace IIA
     bool constraints_satisfied;
     bool bounds_satisfied;
     bool optimized;
-    bool error;
-    int log_start; // first index of log entries for latest method call
-    std::vector<std::string> message_log;
+
+    // The remainder are mutable so caller can set them from IIA::IA::get_result()
+
+    // Feedback that something went wrong. Caller can clear it.
+    mutable bool error;
+
+    // Caller can choose where text messages go, if anywhere.
+    mutable std::ostream *message_log = nullptr;
     
-    // mutable so caller can set these flags directly from get_result
+    // Flags that control the verbocity of the message_log.
     mutable bool log_error=true, log_warning=true, log_info=false, log_debug=false;
   };
 
-  void print_log(IAResult &result);
 }

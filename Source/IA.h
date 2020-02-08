@@ -45,15 +45,11 @@ public:
 	void resize_rows(size_t nrows);
 	void resize_cols(size_t ncols);
 
-	size_t size();
+  std::pair<size_t, size_t> size();
 	size_t size_rows();
 	size_t size_cols();
 
 	//== Define Problem
-
-	// =
-	enum ConstraintType {EQ, LE, GE, EVEN, BAD};
-	//                   ==, <=, >=, =2k,
 
 	// A
 	int next_row(); // optional, returns index of next unused row 0..	
@@ -66,17 +62,18 @@ public:
 	void set_rhs(int row, int val); // b(row) = val
 
 	// x
-	// to set no bounds
-	//   set_bound_hi( c, std::numeric_limits<int>::max() );
-    //   set_bound_lo( c, std::numeric_limits<int>::lowest() );
 	void set_bounds(int col, int lo, int hi); 
 	void set_bound_lo(int col, int lo);
 	void set_bound_hi(int col, int hi);
+  void set_no_bound_lo(int col);
+  void set_no_bound_hi(int col);
+  void set_no_bounds(int col);
+
 	// goals must be in range (0,infinity) (int max in practice)
 	// goals are scaled to be in this range and the modified value is returned
 	//   if goals outside this range are required, you must scale the col variable instead
 	double set_goal(int col, double goal);
-	double set_no_goal(int col);
+	void set_no_goal(int col);
 
 	//== Defaults
 	//   rows are sparse: vectors of column indices and coefficient values
@@ -86,7 +83,7 @@ public:
     //   goals default to 1.
 
 	// get versions of the set methods
-	void get_row(int row, const std::vector<int> &cols, const std::vector<int> &vals) const;
+	void get_row(int row, const std::vector<int> *&cols, const std::vector<int> *&vals) const;
 	int get_row_col(int row, int col) const;
 	ConstraintType get_constraint(int row) const;
 	int get_rhs(int row) const;
@@ -99,8 +96,9 @@ public:
 	//== Solve
 
 	// sets x
-	void solve();
-	void solve_feasible(); // solves constraints and bounds only, ignores goals.
+	bool solve();
+	bool solve_feasible(); // solves constraints and bounds only, ignores goals.
+  bool is_solved();
 
 	// If you solve the problem, then add rows, the current solution is not thrown out.
 	// Instead, (equality) rows are added with slack variables whose current value is out of bounds.
@@ -112,12 +110,12 @@ public:
   // can set which types of messages are logged
 	// can check this for "error" after each operation
   // see IAResult.h for details
-	const IAResult &get_result() const;
+	const IAResult *get_result() const;
 
 private:
   IIA_Internal::IncrementalIntervalAssignment *ia;
 	int free_row;
-  IAResult result;
+  IAResult *result;
 };
 
 #include "IAInline.h"

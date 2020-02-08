@@ -4,11 +4,15 @@
 #include <numeric>
 #include <cmath>
 
-#include "IAResult.h"
-#include <stdio.h>
+#include "IAResultImplementation.h"
 
-// to do
+#include "CpuTimer.h"
+
+// to do (x = done)
 //  x move freeze_problem_size to start of solve, depending on whether solving for the first time or not
+//  x CUBIT_TRUE, CUBIT_FALSE to true and false
+//  x GE etc to GE, etc
+//  x CUBIT_FAILURE, CUBIT_SUCCESS to bool
 //   data layout for variables with goals and slack variables and sum-even vars... probably fast enough we can just go over all of them and check the goals. maybe need something to mark vars whose column coefficients are 2
 //      gather and save as set at beginning of problem. Caller might have defined dummy variables, etc.
 //   sum-even constraint conversion
@@ -17,9 +21,13 @@
 //  x PRINT_INFO, print_flag, put in log instead
 //   verify_full_solution, get rid of refentities
 //   get rid of names?! or convert
+//   figure out when to sort rows, perhaps a flag as to whether they've been sorted or not
+//   figure out when to reset the solved flag,
 //   use a tool to determine code that isn't used and delete it
 //   fill in public interface methods
+//   get rid of compiler warnings, sign comparision and losing precision, etc.
 //   test functions
+//   get rid of the +1 indexing when subdividing the problem.  check for inefficient array searches
 //   beautify output, decide about prefix strings, only start a new message if we have a lf at the end of the string...
 //   organize like methods
 //   cmake
@@ -30,10 +38,17 @@
 namespace IIA_Internal
 {
 
+  using IIA::ConstraintType;
+  using IIA::EQ;
+  using IIA::LE;
+  using IIA::GE;
+  using IIA::EVEN;
+  using IIA::FREE;
+  using IIA::BAD;
+
   bool IncrementalIntervalAssignment::names_exist()
   {return false;}
-
-    
+  
   // greatest common divisor of u and v
 // always returns a positive number, as we take abs of u and v
 int gcd(int u, int v)
@@ -89,49 +104,6 @@ int IncrementalIntervalAssignment::gcd_col(int r, int c)
   return g;
 }
 
-  void IncrementalIntervalAssignment::print_vec(const std::vector<int> &vec, bool lf)
-{
-  for (auto v : vec)
-    log_message(INFO_MSG," %d",v);
-  if (lf)
-    log_message(INFO_MSG,"\n");
-}
-void IncrementalIntervalAssignment::print_vec(const std::vector< std::pair<int,int> > &vec)
-{
-  for (auto v : vec)
-    log_message(INFO_MSG," %d(%d)", v.first, v.second);
-  log_message(INFO_MSG,"\n");
-}
-void IncrementalIntervalAssignment::print_set(const std::set< std::pair<int,int> > &aset)
-{
-  for (auto s : aset)
-    log_message(INFO_MSG," %d(%d)", s.first, s.second);
-  log_message(INFO_MSG,"\n");
-}
-
-void IncrementalIntervalAssignment::print_map(const BlockingCols &amap)
-{
-  for (auto m : amap)
-  {
-    const auto c = m.first;
-    const auto lo =  m.second.first;
-    const auto hi = m.second.second;
-    if (lo==block_min)
-      log_message(INFO_MSG," %d(-inf,%d)", c, hi);
-    else if (hi==block_max)
-      log_message(INFO_MSG," %d(%d,inf)", c, lo);
-    else
-      log_message(INFO_MSG," %d(%d,%d)", c, lo, hi);
-  }
-  log_message(INFO_MSG,"\n");
-}
-void IncrementalIntervalAssignment::print_map(const std::map<int,int> &amap)
-{
-  for (auto m : amap)
-    log_message(INFO_MSG," %d(%d)", m.first, m.second);
-  log_message(INFO_MSG,"\n");
-}
-
 // return the divisor
 void row_simplify_vals(std::vector<int> &v)
 {
@@ -171,7 +143,7 @@ void row_simplify_vals(std::vector<int> &v)
   // return m;
 }
 
-MatrixSparseInt::MatrixSparseInt(MatrixSparseInt&M,int MaxMRow)
+MatrixSparseInt::MatrixSparseInt(MatrixSparseInt&M,int MaxMRow) : result(M.result)
 {
   std::copy(M.rows.begin(),M.rows.begin()+MaxMRow,back_inserter(rows));
   fill_in_cols_from_rows();
@@ -222,15 +194,11 @@ void IncrementalIntervalAssignment::solution_init()
 // assign independent vars to their closest integer goal
 void IncrementalIntervalAssignment::assign_vars_goals(bool overwrite)
 {
-  // initialize to the goal for each edge
-  associated_int_vars()->reset();
-  for ( int i = 0; i < num_int_vars(); i++ )
+  for ( int i = 0; i <= used_col; ++i)
   {
-    TDILPIntegerVariable *edge = associated_int_vars()->get_and_step();
-    assert( int_var_column( edge ) == i );
     if (overwrite || col_solution[i]==0)
     {
-      int v = (int) std::lround( edge->goal() ); // rounding a true double to nearest int
+      int v = (int) std::lround( goals[i] );
       v = std::max(v,col_lower_bounds[i]);
       v = std::min(v,col_upper_bounds[i]);
       col_solution[i] = v;
@@ -273,7 +241,7 @@ bool IncrementalIntervalAssignment::assign_dummies_feasible()
         {
           if ((size_t)col!=c && (size_t)col>=allDummies_start())
           {
-            log_message(ERROR_MSG,"IIA: more than one dummy variable in a constraint row is not supported.\n");
+            result->error_message("IIA: more than one dummy variable in a constraint row is not supported.\n");
           }
         }
       }
@@ -412,17 +380,17 @@ bool IncrementalIntervalAssignment::find_tied_variables()
         ++num_tied_to;
       }
     }
-    log_message(INFO_MSG,"%d variables were removed and tied to %d variables\n", num_tied, num_tied_to);
+    result->info_message("%d variables were removed and tied to %d variables\n", num_tied, num_tied_to);
     if (result->log_debug)
     {
       for (int c=0; (size_t) c<tied_variables.size(); ++c)
       {
-        log_message(INFO_MSG,"%d tied :",c);
+        result->info_message("%d tied :",c);
         for (auto c2 : tied_variables[c])
         {
-          log_message(INFO_MSG," %d",c2);
+          result->info_message(" %d",c2);
         }
-        log_message(INFO_MSG,"\n");
+        result->info_message("\n");
       }
     }
   }
@@ -516,10 +484,10 @@ void IncrementalIntervalAssignment::adjust_solution_tied_variables()
       {
         if (old_val != col_solution[c])
         {
-          log_message(DEBUG_MSG,"MasterTie x%d ", c);
+          result->debug_message("MasterTie x%d ", c);
           if (names_exist())
-            log_message(DEBUG_MSG,"%s", col_names[c].c_str());
-          log_message(DEBUG_MSG," adjusted from %d to %d\n", old_val, col_solution[c]);
+            result->debug_message("%s", col_names[c].c_str());
+          result->debug_message(" adjusted from %d to %d\n", old_val, col_solution[c]);
         }
       }
       // debug
@@ -634,53 +602,53 @@ double IncrementalIntervalAssignment::set_goal(int c, double goal)
   return goal;
 }
 
-bool IncrementalIntervalAssignment::SetValuesFn::update_values(IncrementalIntervalAssignment &IIA, QElement &qe)
+bool IncrementalIntervalAssignment::SetValuesFn::update_values(IncrementalIntervalAssignment &iia, QElement &qe)
 {
   // no solution previously?
   if (!qe.solution_set)
   {
     qe.solution_set=true;
-    qe.solution = IIA.col_solution[qe.c];
-    set_values_implementation(IIA, qe );
+    qe.solution = iia.col_solution[qe.c];
+    set_values_implementation(iia, qe );
     return true;
   }
   // queue priority based on a different solution value?
-  if (qe.solution!=IIA.col_solution[qe.c])
+  if (qe.solution!=iia.col_solution[qe.c])
   {
     QElement qe_old = qe;
-    qe.solution = IIA.col_solution[qe.c];
-    set_values_implementation(IIA, qe );
+    qe.solution = iia.col_solution[qe.c];
+    set_values_implementation(iia, qe );
     return ( qe < qe_old ); // ||  qe_old < qe
   }
   return false;
 }
 
-void IncrementalIntervalAssignment::SetValuesFn::set_values(IncrementalIntervalAssignment &IIA, QElement &qe, int solution)
+void IncrementalIntervalAssignment::SetValuesFn::set_values(IncrementalIntervalAssignment &iia, QElement &qe, int solution)
 {
   qe.solution=solution;
   qe.solution_set=true;
-  set_values_implementation(IIA,qe);
+  set_values_implementation(iia,qe);
 }
 
-void IncrementalIntervalAssignment::SetValuesFn::set_values(IncrementalIntervalAssignment &IIA, QElement &qe)
+void IncrementalIntervalAssignment::SetValuesFn::set_values(IncrementalIntervalAssignment &iia, QElement &qe)
 {
-  qe.solution=IIA.col_solution[qe.c];
+  qe.solution=iia.col_solution[qe.c];
   qe.solution_set=true;
-  set_values_implementation(IIA,qe);
+  set_values_implementation(iia,qe);
 }
 
 
-void IncrementalIntervalAssignment::SetValuesBounds::set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe )
+void IncrementalIntervalAssignment::SetValuesBounds::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
 {
   if (qe.c>-1)
   {
     assert(qe.solution_set);
-    auto diff = IIA.compute_out_of_bounds(qe.c,qe.solution);
+    auto diff = iia.compute_out_of_bounds(qe.c,qe.solution);
     qe.valueA = abs(diff);
     qe.dx = (diff > 0 ? 1 :  (diff < 0 ? -1 : 0) );
     double glo,ghi;
-    // qe.valueB = (IIA.compute_tied_goals(qe.c,glo,ghi) ? abs(ghi): abs(glo));
-    bool tied = IIA.compute_tied_goals(qe.c,glo,ghi);
+    // qe.valueB = (iia.compute_tied_goals(qe.c,glo,ghi) ? abs(ghi): abs(glo));
+    bool tied = iia.compute_tied_goals(qe.c,glo,ghi);
     if (tied)
     {
       // tied-to variables get the highest priority of all the tied variables
@@ -701,17 +669,17 @@ void IncrementalIntervalAssignment::SetValuesBounds::set_values_implementation(I
   }
 }
 
-void IncrementalIntervalAssignment::SetValuesRatioR::set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe )
+void IncrementalIntervalAssignment::SetValuesRatioR::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
 {
   auto &c=qe.c;
   if (c>-1)
   {
     double glo,ghi;
-    if (IIA.compute_tied_goals(c,glo,ghi))
+    if (iia.compute_tied_goals(c,glo,ghi))
     {
       QElement qh = qe;
-      set_values_goal(IIA,glo,qe);
-      set_values_goal(IIA,ghi,qh);
+      set_values_goal(iia,glo,qe);
+      set_values_goal(iia,ghi,qh);
       // return the *higher* priority
       if (qe<qh)
       {
@@ -720,7 +688,7 @@ void IncrementalIntervalAssignment::SetValuesRatioR::set_values_implementation(I
     }
     else
     {
-      set_values_goal(IIA,glo,qe);
+      set_values_goal(iia,glo,qe);
     }
   }
   else
@@ -731,7 +699,7 @@ void IncrementalIntervalAssignment::SetValuesRatioR::set_values_implementation(I
   }
 }
 
-void IncrementalIntervalAssignment::SetValuesRatioR::set_values_goal(IncrementalIntervalAssignment &IIA, double g, QElement &qe )
+void IncrementalIntervalAssignment::SetValuesRatioR::set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe )
 {
   assert(qe.solution_set);
   if (g==0.) // its a "don't care" dummy variable
@@ -777,7 +745,7 @@ void IncrementalIntervalAssignment::SetValuesRatioR::set_values_goal(Incremental
   // if we desire increment and we are already at the upper bound, set the priority to 0
   if (qe.dx>0)
   {
-    if (x_int>=IIA.col_upper_bounds[qe.c])
+    if (x_int>=iia.col_upper_bounds[qe.c])
     {
       qe.valueA=0.;
       qe.valueB=0.;
@@ -787,7 +755,7 @@ void IncrementalIntervalAssignment::SetValuesRatioR::set_values_goal(Incremental
   // if we desire decrement and we are already at the lower bound, set the priority to 0
   else
   {
-    if (x_int<=IIA.col_lower_bounds[qe.c])
+    if (x_int<=iia.col_lower_bounds[qe.c])
     {
       qe.valueA=0.;
       qe.valueB=0.;
@@ -796,17 +764,17 @@ void IncrementalIntervalAssignment::SetValuesRatioR::set_values_goal(Incremental
   }
 }
 
-void IncrementalIntervalAssignment::SetValuesRatio::set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe )
+void IncrementalIntervalAssignment::SetValuesRatio::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
 {
   auto &c=qe.c;
   if (c>-1)
   {
     double glo,ghi;
-    if (IIA.compute_tied_goals(c,glo,ghi))
+    if (iia.compute_tied_goals(c,glo,ghi))
     {
       QElement qh = qe;
-      set_values_goal(IIA,glo,qe);
-      set_values_goal(IIA,ghi,qh);
+      set_values_goal(iia,glo,qe);
+      set_values_goal(iia,ghi,qh);
       // return the *higher* priority
       if (qe<qh)
       {
@@ -815,7 +783,7 @@ void IncrementalIntervalAssignment::SetValuesRatio::set_values_implementation(In
     }
     else
     {
-      set_values_goal(IIA,glo,qe);
+      set_values_goal(iia,glo,qe);
     }
   }
   else
@@ -826,7 +794,7 @@ void IncrementalIntervalAssignment::SetValuesRatio::set_values_implementation(In
   }
 }
 
-void IncrementalIntervalAssignment::SetValuesRatio::set_values_goal(IncrementalIntervalAssignment &IIA, double g, QElement &qe )
+void IncrementalIntervalAssignment::SetValuesRatio::set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe )
 {
   assert(qe.solution_set);
   if (g==0.) // its a "don't care" dummy variable
@@ -855,7 +823,7 @@ void IncrementalIntervalAssignment::SetValuesRatio::set_values_goal(IncrementalI
   // if we desire increment and we are already at the upper bound, set the priority to 0
   if (qe.dx>0)
   {
-    if (x_int>=IIA.col_upper_bounds[qe.c])
+    if (x_int>=iia.col_upper_bounds[qe.c])
     {
       qe.valueA=0.;
       qe.valueB=0.;
@@ -865,7 +833,7 @@ void IncrementalIntervalAssignment::SetValuesRatio::set_values_goal(IncrementalI
   // if we desire decrement and we are already at the lower bound, set the priority to 0
   else
   {
-    if (x_int<=IIA.col_lower_bounds[qe.c])
+    if (x_int<=iia.col_lower_bounds[qe.c])
     {
       qe.valueA=0.;
       qe.valueB=0.;
@@ -876,7 +844,7 @@ void IncrementalIntervalAssignment::SetValuesRatio::set_values_goal(IncrementalI
 
 bool IncrementalIntervalAssignment::QWithReplacement::tip_top( IncrementalIntervalAssignment::QElement &t)
 {
-  log_message(DEBUG_MSG,"Q size %d ", (int) Q.size());
+  iia->result->debug_message("Q size %d ", (int) Q.size());
   if (Q.empty())
   {
     t = QElement();
@@ -889,19 +857,19 @@ bool IncrementalIntervalAssignment::QWithReplacement::tip_top( IncrementalInterv
   Q.erase(Qback);
   elements.erase(t.c);
   
-  if (result->log_debug)
+  if (iia->result->log_debug)
   {
-    log_message(INFO_MSG,"tip top ");
-    t.print();
+    iia->result->info_message("tip top ");
+    t.print(iia);
   }
   return false;
 }
 
 void IncrementalIntervalAssignment::QWithReplacement::update(const std::vector<int> &cols)
 {
-  if (0 && result->log_debug)
+  if (0 && iia->result->log_debug)
   {
-    log_message(INFO_MSG,"Q before update ");
+    iia->result->info_message("Q before update ");
     print();
   }
   
@@ -914,11 +882,11 @@ void IncrementalIntervalAssignment::QWithReplacement::update(const std::vector<i
       add(c);
     }
     // column was in the queue, and solution changed
-    else if (it->second.solution != IIA->col_solution[c])
+    else if (it->second.solution != iia->col_solution[c])
     {
       QElement qe;
       qe.c = c;
-      val_fn->set_values(*IIA,qe);
+      val_fn->set_values(*iia,qe);
       // remove from Q
       Q.erase(it->second);
       // replace element
@@ -936,45 +904,45 @@ void IncrementalIntervalAssignment::QWithReplacement::update(const std::vector<i
     }
   }
   
-  if (0 && result->log_debug)
+  if (0 && iia->result->log_debug)
   {
-    log_message(INFO_MSG,"Q after update ");
+    iia->result->info_message("Q after update ");
     print();
   }
 
 }
 
-void IncrementalIntervalAssignment::QElement::print()
+void IncrementalIntervalAssignment::QElement::print(IncrementalIntervalAssignment *iia)
 {
-  log_message(INFO_MSG,"qe c:%d ",c);
+  iia->result->info_message("qe c:%d ",c);
   if (!solution_set)
-    log_message(INFO_MSG,"unset");
+    iia->result->info_message("unset");
   else
-    log_message(INFO_MSG,"sol:%d",solution);
-  log_message(INFO_MSG," A:%f B:%f C:%f\n",valueA,valueB,valueC);
+    iia->result->info_message("sol:%d",solution);
+  iia->result->info_message(" A:%f B:%f C:%f\n",valueA,valueB,valueC);
 }
 
 void IncrementalIntervalAssignment::QWithReplacement::print()
 {
-  log_message(INFO_MSG,"QWithReplacement %lu elements, threshold %f\n", (unsigned long) elements.size(), threshold);
+  iia->result->info_message("QWithReplacement %lu elements, threshold %f\n", (unsigned long) elements.size(), threshold);
   //  for (auto it : elements)
   //  {
-  //    log_message(INFO_MSG,"%d ", it.first);
+  //    result->info_message("%d ", it.first);
   //    it.second.print();
   //  }
-  log_message(INFO_MSG,"Q %lu set\n", (unsigned long) Q.size() );
+  iia->result->info_message("Q %lu set\n", (unsigned long) Q.size() );
   for (auto e : Q)
   {
-    e.print();
+    e.print(iia);
   }
 }
 
 bool IncrementalIntervalAssignment::tip_top( std::priority_queue<QElement> &Q, SetValuesFn &val_fn, double threshold, QElement &t)
 {
-  log_message(DEBUG_MSG,"Q size %d ", (int) Q.size());
+  result->debug_message("Q size %d ", (int) Q.size());
   if (Q.empty())
   {
-    log_message(DEBUG_MSG,"Q empty, all done!!!\n");
+    result->debug_message("Q empty, all done!!!\n");
     t = QElement();
     return true;
   }
@@ -984,18 +952,18 @@ bool IncrementalIntervalAssignment::tip_top( std::priority_queue<QElement> &Q, S
 
   // if (result->log_debug && t.c==1530) //zzyk debug
   // {
-  //  log_message(DEBUG_MSG,"\nIIA tip_top: x%d priority %g, sol %d, goal %g\n", t.c, t.valueA, t.solution, goals[t.c]);
+  //  result->debug_message("\nIIA tip_top: x%d priority %g, sol %d, goal %g\n", t.c, t.valueA, t.solution, goals[t.c]);
   // }
   // Check that the element value is up to date.
   // If not, then put it back on the queue and get the new top
   while ( val_fn.update_values(*this,t) )
   {
-    log_message(DEBUG_MSG,"Q stale.\n");
+    result->debug_message("Q stale.\n");
     if (t.valueA>threshold)
     {
       if (1 || t<Q.top())  //zzyk 1 || t<Q.top
       {
-        log_message(DEBUG_MSG,"Q reque.\n");
+        result->debug_message("Q reque.\n");
         Q.push(t);
       }
       else
@@ -1006,12 +974,12 @@ bool IncrementalIntervalAssignment::tip_top( std::priority_queue<QElement> &Q, S
     }
     else
     {
-      log_message(DEBUG_MSG,"Q tossed.\n");
+      result->debug_message("Q tossed.\n");
     }
 
     if (Q.empty())
     {
-      log_message(DEBUG_MSG,"Q empty, all done!!!\n");
+      result->debug_message("Q empty, all done!!!\n");
       t = QElement();
       return true;
     }
@@ -1022,14 +990,14 @@ bool IncrementalIntervalAssignment::tip_top( std::priority_queue<QElement> &Q, S
   // clear any remaining values below the threshold
   if (t.valueA<=threshold)
   {
-    log_message(DEBUG_MSG,"Q being emptied.\n");
+    result->debug_message("Q being emptied.\n");
     Q = std::priority_queue<QElement>();
   }
   // if (result->log_debug && t.c==1530) //zzyk
   // {
-  //  log_message(DEBUG_MSG,"\nIIA tip_top end: x%d priority %g, sol %d, goal %g\n", t.c, t.valueA, t.solution, goals[t.c];
+  //  result->debug_message("\nIIA tip_top end: x%d priority %g, sol %d, goal %g\n", t.c, t.valueA, t.solution, goals[t.c];
   // }
-  log_message(DEBUG_MSG,"Q tip top %d values %g %g, remaining Q size %d\n", t.c, t.valueA, t.valueB, (int) Q.size());
+  result->debug_message("Q tip top %d values %g %g, remaining Q size %d\n", t.c, t.valueA, t.valueB, (int) Q.size());
 
   return false;
 }
@@ -1038,7 +1006,7 @@ void IncrementalIntervalAssignment::QWithReplacement::add(int c)
 {
   QElement qe;
   qe.c = c;
-  val_fn->set_values(*IIA,qe);
+  val_fn->set_values(*iia,qe);
   if (qe.valueA>threshold)
   {
     elements[c]=qe;
@@ -1082,22 +1050,22 @@ bool IncrementalIntervalAssignment::infeasible_constraints()
     if (row.cols.empty() && b!=0)
     {
       // 0 = constant
-      bool bad = (con==CUBIT_EQ || (con==CUBIT_GE && b>0) || (con==CUBIT_LE && b<0));
+      bool bad = (con==EQ || (con==GE && b>0) || (con==LE && b<0));
       if (bad)
       {
         if (result->log_info || result->log_debug)
         {
           rc=true;
-          log_message(INFO_MSG,"Interval matching row %d reduced to 0 == %d, problem is overconstrained and infeasible.\n", r, b);
+          result->info_message("Interval matching row %d reduced to 0 == %d, problem is overconstrained and infeasible.\n", r, b);
           if (result->log_debug)
-            print_rowIIA(r);
+            print_row_iia(r);
         }
         else
           return true;
       }
     }
     // only one variable in the row
-    else if (row.cols.size()==1 && con==CUBIT_EQ)
+    else if (row.cols.size()==1 && con==EQ)
     {
       int v = row.vals[0];
       // solution not integer.  x = b/v, but v does not divide b
@@ -1106,8 +1074,8 @@ bool IncrementalIntervalAssignment::infeasible_constraints()
         if (result->log_info || result->log_debug)
         {
           rc=true;
-          log_message(INFO_MSG,"Interval matching row %d has no integer solution, problem is infeasible.\n",r);
-          print_rowIIA(r);
+          result->info_message("Interval matching row %d has no integer solution, problem is infeasible.\n",r);
+          print_row_iia(r);
         }
         else
           return true;
@@ -1125,12 +1093,12 @@ bool IncrementalIntervalAssignment::infeasible_constraints()
           if (result->log_info || result->log_debug)
           {
             rc=true;
-            log_message(INFO_MSG,"Interval matching row %d, its only solution is below the variable lower bound, problem is infeasible.\n",r);
+            result->info_message("Interval matching row %d, its only solution is below the variable lower bound, problem is infeasible.\n",r);
             if (names_exist())
-              log_message(INFO_MSG,"x%d %s ", c, col_names[c].c_str());
+              result->info_message("x%d %s ", c, col_names[c].c_str());
             else
-              log_message(INFO_MSG,"x%d ", c);
-            log_message(INFO_MSG,"only has solution %d < %d lower bound.\n",s, col_lower_bounds[c]);
+              result->info_message("x%d ", c);
+            result->info_message("only has solution %d < %d lower bound.\n",s, col_lower_bounds[c]);
           }
           else
             return true;
@@ -1141,23 +1109,23 @@ bool IncrementalIntervalAssignment::infeasible_constraints()
           if (result->log_info || result->log_debug)
           {
             rc=true;
-            log_message(INFO_MSG,"Interval matching row %d, its only solution is above the variable upper bound, problem is infeasible.\n",r);
+            result->info_message("Interval matching row %d, its only solution is above the variable upper bound, problem is infeasible.\n",r);
             if (names_exist())
-              log_message(INFO_MSG,"x%d %s ", c, col_names[c].c_str());
+              result->info_message("x%d %s ", c, col_names[c].c_str());
             else
-              log_message(INFO_MSG,"x%d ", c);
-            log_message(INFO_MSG,"only has solution %d > %d upper bound",s, col_upper_bounds[c]);
+              result->info_message("x%d ", c);
+            result->info_message("only has solution %d > %d upper bound",s, col_upper_bounds[c]);
           }
           else
             return true;
         }
       }
     }
-    else if (constraint[r]==CUBIT_LE || constraint[r]==CUBIT_GE)
+    else if (constraint[r]==LE || constraint[r]==GE)
     {
       // check if constraint is feasible first, return failure if not
       // this is important for autoscheme for surfaces with all hard-set intervals
-      if (con==CUBIT_LE)
+      if (con==LE)
       {
         int sum=0;
         // what's the smallest the row sum could possibly be
@@ -1192,15 +1160,15 @@ bool IncrementalIntervalAssignment::infeasible_constraints()
           if (result->log_info || result->log_debug)
           {
             rc=true;
-            log_message(INFO_MSG,"Interval matching row %d sum must be <= %d, but smallest possible sum is %d; problem is infeasible.\n", r, b, sum);
+            result->info_message("Interval matching row %d sum must be <= %d, but smallest possible sum is %d; problem is infeasible.\n", r, b, sum);
             if (names_exist() || result->log_debug)
-              print_rowIIA(r);
+              print_row_iia(r);
           }
           else
             return true;
         }
       }
-      else if (con==CUBIT_GE)
+      else if (con==GE)
       {
         int sum=0;
         // what's the largest the row sum could possibly be
@@ -1235,9 +1203,9 @@ bool IncrementalIntervalAssignment::infeasible_constraints()
           if (result->log_info || result->log_debug)
           {
             rc=true;
-            log_message(INFO_MSG,"Interval matching row %d sum must be >= %d, but smallest possible sum is %d; problem is infeasible.\n", r, b, sum);
+            result->info_message("Interval matching row %d sum must be >= %d, but smallest possible sum is %d; problem is infeasible.\n", r, b, sum);
             if (names_exist() || result->log_debug)
-              print_rowIIA(r);
+              print_row_iia(r);
           }
           else
             return true;
@@ -1260,14 +1228,14 @@ bool IncrementalIntervalAssignment::satisfy_constaints(const std::vector<int>&co
   {
     timer = new CpuTimer;
   }
-  log_message(DEBUG_MSG,"\nIIA: finding a solution that satisfies the constraints\n");
+  result->debug_message("\nIIA: finding a solution that satisfies the constraints\n");
   // debug
   
   if (infeasible_constraints())
   {
-    if (result->log_info)  log_message(ERROR_MSG,    "Match Intervals problem is overconstrained and infeasible; there is no solution\n");
-    else            log_message(DEBUG_MSG,"Match Intervals problem is overconstrained and infeasible; there is no solution\n");
-    return CUBIT_FAILURE;
+    if (result->log_info)  result->error_message(    "Match Intervals problem is overconstrained and infeasible; there is no solution\n");
+    else            result->debug_message("Match Intervals problem is overconstrained and infeasible; there is no solution\n");
+    return false;
   }
   
   // try to satisfy constraints using direct back-substitution using the rref
@@ -1282,24 +1250,24 @@ bool IncrementalIntervalAssignment::satisfy_constaints(const std::vector<int>&co
   std::vector<int>cols_fail;
   if (!assign_dependent_vars(cols_dep,rows_dep,cols_fail))
   {
-    // log_message(INFO_MSG,"cols_fail B"); print_vec(cols_fail);
-    log_message(DEBUG_MSG,"First pass at assigning dependent vars integer values failed. Now trying to adjust independent vars.\n");
+    // result->info_message("cols_fail B"); print_vec(result, cols_fail);
+    result->debug_message("First pass at assigning dependent vars integer values failed. Now trying to adjust independent vars.\n");
     // work harder for a feasible assignment
     
     // adjust independent vars that only appear in a single row, see if that provides an integer solution to the dependent vars
     if (!adjust_independent_vars(cols_fail))
     {
-      log_message(DEBUG_MSG,"Second pass at assigning dependent vars integer values failed. Now trying Hermite normal form. If that fails, the problem is infeasible and there is no solution.\n");
+      result->debug_message("Second pass at assigning dependent vars integer values failed. Now trying Hermite normal form. If that fails, the problem is infeasible and there is no solution.\n");
 
       // fallback is HNF
       //   In theory it always finds an integer solution if there is one
       did_hnf=true;
-      MatrixSparseInt B, U;
+      MatrixSparseInt B(result), U(result);
       std::vector<int> hnf_col_order;
       auto OK = HNF(B,U,hnf_col_order);
       if (!OK)
       {
-        log_message(ERROR_MSG,"HNF algorithm failed; implementation error.\n");
+        result->error_message("HNF algorithm failed; implementation error.\n");
         rc=false;
       }
       else
@@ -1322,7 +1290,7 @@ bool IncrementalIntervalAssignment::satisfy_constaints(const std::vector<int>&co
   if (result->log_debug)
   {
     double time_feas = timer->cpu_secs();
-    log_message(INFO_MSG,"Satisfy constraint time %f\n",time_feas);
+    result->info_message("Satisfy constraint time %f\n",time_feas);
     delete timer;
   }
   //debug
@@ -1344,7 +1312,7 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
   std::vector<int>cols_fail;
   if (!bounds_satisfied(cols_fail))
   {
-    log_message(DEBUG_MSG,"\nIIA: finding a solution that satisfies the variable bounds\n");
+    result->debug_message("\nIIA: finding a solution that satisfies the variable bounds\n");
     bool rc(true); // set to false if we give up on any variable
     // to do
     // find sensitivity of dependent vars to independent vars
@@ -1378,10 +1346,10 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
     while (!Q.empty())
     {
       // debug
-      log_message(DEBUG_MSG,"iter %d",iter++);
+      result->debug_message("iter %d",iter++);
       //      if (0 && ++iter>max_iter)
       //      {
-      //        log_message(ERROR_MSG,"IIA: max_iter %d reached when trying to satisfy variable bounds.\n",max_iter);
+      //        result->error_message("IIA: max_iter %d reached when trying to satisfy variable bounds.\n",max_iter);
       //        break;
       //      }
       // debug
@@ -1441,10 +1409,10 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
               else
               {
                 // debug
-                // log_message(ERROR_MSG,"Found a case where unbounded works!\n");
-                log_message(DEBUG_MSG,"row %d unbounded ",(int)m);
+                // result->error_message("Found a case where unbounded works!\n");
+                result->debug_message("row %d unbounded ",(int)m);
                 if (result->log_debug)
-                  row.print_row();
+                  row.print_row(result);
                 // debug
                 
                 // accept_strict_improvement is overkill and inefficient in this case, but it works
@@ -1458,7 +1426,7 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
                 }
                 else
                 {
-                  log_message(ERROR_MSG,"Incremental Interval Assignment algorithm error. The row was unbounded but was somehow blocked, a contradiction.\n");
+                  result->error_message("Incremental Interval Assignment algorithm error. The row was unbounded but was somehow blocked, a contradiction.\n");
                 }
               }
             } // for tc_rows
@@ -1480,7 +1448,7 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
               }
               else if (self_block)
               {
-                log_message(DEBUG_MSG,"row %d selfblocks col %d\n",(int)m,t.c);
+                result->debug_message("row %d selfblocks col %d\n",(int)m,t.c);
                 // give up later on this variable if it's not possible to get a combination with a smaller coefficient
                 smallest_self_block_coeff=std::min(smallest_self_block_coeff,self_block_coeff);
                 
@@ -1493,7 +1461,7 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
               }
               else
               {
-                log_message(DEBUG_MSG,"row %d blocked\n",(int)m);
+                result->debug_message("row %d blocked\n",(int)m);
               }
             }
           }
@@ -1501,21 +1469,21 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
         
         if (!fixed)
         {
-          log_message(DEBUG_MSG,"\nIIA nullspace: No single nullspace vector gave strict improvement towards the bounds of x%d\n", t.c);
+          result->debug_message("\nIIA nullspace: No single nullspace vector gave strict improvement towards the bounds of x%d\n", t.c);
           // Find a nullspace combination that doesn't have the blocking vars in the forbidden directions
           
           // if we fail, then don't put t back on the queue, but keep trying to improve the other vars
           
           if (give_up)
           {
-            log_message(DEBUG_MSG,"IIA nullspace: It's not possible to improve x%d to be within bounds. Giving up on this variable.\n", t.c);
+            result->debug_message("IIA nullspace: It's not possible to improve x%d to be within bounds. Giving up on this variable.\n", t.c);
             rc=false;
           }
           else if (M.col_rows[t.c].empty())
           {
-            log_message(DEBUG_MSG,"Variable x%d isn't in any nullspace row, so its impossible to improve!\n",t.c);
+            result->debug_message("Variable x%d isn't in any nullspace row, so its impossible to improve!\n",t.c);
             // this isn't an error if we are doing autoscheme and the surface doesn't admit that scheme.
-            log_message(DEBUG_MSG,"Unable to assign intervals within bounds, check mesh scheme, vertex types and sweep directions.\n");
+            result->debug_message("Unable to assign intervals within bounds, check mesh scheme, vertex types and sweep directions.\n");
             rc=false;
           }
           else
@@ -1535,8 +1503,8 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
                 // debug
                 if (result->log_debug)
                 {
-                  log_message(DEBUG_MSG,"Gaussian success, new row ");
-                  R.print_row();
+                  result->debug_message("Gaussian success, new row ");
+                  R.print_row(result);
                   // M.print_matrix("new nullspace");
                 }
                 
@@ -1563,7 +1531,7 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
                     smallest_self_block_coeff=std::min(smallest_self_block_coeff,self_block_coeff);
                     if (smallest_self_block_coeff==1)
                     {
-                      log_message(DEBUG_MSG,"  Giving up! self_blocking coefficient is 1. latest self_block_coeff=%d.\n", smallest_self_block_coeff);
+                      result->debug_message("  Giving up! self_blocking coefficient is 1. latest self_block_coeff=%d.\n", smallest_self_block_coeff);
                       give_up=true;
                     }
                   }
@@ -1573,7 +1541,7 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
                     auto new_size = blocking_size(blocking_cols);
                     if (old_size==new_size)
                     {
-                      log_message(DEBUG_MSG,"  Giving up! blocking_cols size=%d didn't increase.\n", (int)new_size);
+                      result->debug_message("  Giving up! blocking_cols size=%d didn't increase.\n", (int)new_size);
                       give_up=true;
                     }
                   }
@@ -1584,12 +1552,12 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
                 give_up=true;
                 if (result->log_debug)
                 {
-                  log_message(DEBUG_MSG,"  Giving up! Gaussian elimination failed.\n");
+                  result->debug_message("  Giving up! Gaussian elimination failed.\n");
                   if (result->log_debug)
                   {
-                    log_message(INFO_MSG,"MB2 r=%d reduced rows\n",r);
+                    result->info_message("MB2 r=%d reduced rows\n",r);
                     MB2.print_matrix("MB2");
-                    log_message(INFO_MSG,"all_blocking_cols ");
+                    result->info_message("all_blocking_cols ");
                     print_map(all_blocking_cols);
                   }
                 }
@@ -1597,7 +1565,7 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
               
               if ( (size_t)r==MB2.rows.size())
               {
-                log_message(DEBUG_MSG,"  Giving up! there are no more rows to reduce\n");
+                result->debug_message("  Giving up! there are no more rows to reduce\n");
                 give_up=true;
               }
               
@@ -1610,31 +1578,31 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
             if (result->log_debug)
             {
               size_t num_new_rows = M.rows.size() - old_num_rows;
-              log_message(DEBUG_MSG,"IIA: nullspace: %lu rows added; was %lu, now %lu.\n",
+              result->debug_message("IIA: nullspace: %lu rows added; was %lu, now %lu.\n",
                           (unsigned long) num_new_rows,
                           (unsigned long) old_num_rows,
                           (unsigned long) M.rows.size());
               // M.print_matrix("augmented nullspaceB");
               if (num_new_rows>0)
               {
-                log_message(INFO_MSG,"bounds old last row + new rows\n");
+                result->info_message("bounds old last row + new rows\n");
                 const size_t i_start = (old_num_rows>0 ? old_num_rows-1 : 0);
                 
                 for (size_t i = i_start; i<M.rows.size(); ++i)
                 {
-                  log_message(DEBUG_MSG,"row %d ",(int)i);
-                  M.rows[i].print_row();
+                  result->debug_message("row %d ",(int)i);
+                  M.rows[i].print_row(result);
                 }
               }
-              log_message(DEBUG_MSG,"Blocking x columns = ");
+              result->debug_message("Blocking x columns = ");
               print_map(blocking_cols);
               if (fixed)
               {
-                log_message(DEBUG_MSG,"IIA nullspace: fixed x%d . We made a row with a non-zero coeff for it, but zero for the blocking cols.\n", t.c);
+                result->debug_message("IIA nullspace: fixed x%d . We made a row with a non-zero coeff for it, but zero for the blocking cols.\n", t.c);
               }
               else
               {
-                log_message(DEBUG_MSG,"\n\nIIA nullspace: FAILED to fix x%d. Blocking columns won. I'll keep trying to satisfy_bounds on the other variables.\n\n", t.c);
+                result->debug_message("\n\nIIA nullspace: FAILED to fix x%d. Blocking columns won. I'll keep trying to satisfy_bounds on the other variables.\n\n", t.c);
                 M.print_matrix("M nullspace");
                 MB2.print_matrix("MB2 working nullspace");
               }
@@ -1646,7 +1614,7 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
       } // if (u<t)
       else
       {
-        log_message(DEBUG_MSG,"IIA bounds Q: x%d can't seem to be any better than %d. Giving up on it.\n", t.c, col_solution[t.c]);
+        result->debug_message("IIA bounds Q: x%d can't seem to be any better than %d. Giving up on it.\n", t.c, col_solution[t.c]);
       }
     } // while !Q.empty
     
@@ -1655,37 +1623,37 @@ bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMro
     // debug
     if (result->log_debug)
     {
-      log_message(DEBUG_MSG,"IIA bounds Q empty.  ");
+      result->debug_message("IIA bounds Q empty.  ");
       if (cols_fail.empty())
       {
-        log_message(DEBUG_MSG,"IIA bounds are satisfied, ");
+        result->debug_message("IIA bounds are satisfied, ");
         if (rc==false)
         {
-          log_message(DEBUG_MSG,"despite giving up on some variables along the way.\n");
+          result->debug_message("despite giving up on some variables along the way.\n");
         }
         else
-          log_message(DEBUG_MSG,"as expected.\n");
+          result->debug_message("as expected.\n");
       }
       else
       {
-        log_message(DEBUG_MSG,"IIA bounds are UNSATISFIED for %lu variables: ", (unsigned long) cols_fail.size());
-        print_vec(cols_fail);
-        log_message(DEBUG_MSG,"\n");
+        result->debug_message("IIA bounds are UNSATISFIED for %lu variables: ", (unsigned long) cols_fail.size());
+        print_vec(result, cols_fail);
+        result->debug_message("\n");
       }
     }
     
     // bounds should be satisfied as long as rc was false
     if (rc && !success)
-      log_message(ERROR_MSG,"IIA bounds algorithm failure. The Q never got stuck, but the bounds were still not satisfied at the end.\n");
+      result->error_message("IIA bounds algorithm failure. The Q never got stuck, but the bounds were still not satisfied at the end.\n");
 
   }
-  log_message(DEBUG_MSG,"\nIIA: initial solution already satisfies the variable bounds\n");
+  result->debug_message("\nIIA: initial solution already satisfies the variable bounds\n");
 
   // debug
   if (result->log_debug)
   {
     double time_bounds = timer->cpu_secs();
-    log_message(INFO_MSG,"Satisfy variable bounds time %f\n",time_bounds);
+    result->info_message("Satisfy variable bounds time %f\n",time_bounds);
     delete timer;
   }
 
@@ -1735,7 +1703,7 @@ bool IncrementalIntervalAssignment::is_improvement(QElement &s,
   {
     if (!(s<t))
     {
-      log_message(DEBUG_MSG,"Increment would make x%d have unacceptable quality wrt its goal.\n", s.c);
+      result->debug_message("Increment would make x%d have unacceptable quality wrt its goal.\n", s.c);
       return false;
     }
     else
@@ -1745,7 +1713,7 @@ bool IncrementalIntervalAssignment::is_improvement(QElement &s,
       constraint_fn->set_values(*this, qc);
       if (qc.valueA>constraint_threshold)
       {
-        log_message(DEBUG_MSG,"Increment would make x%d not satisfy its variable bounds.\n", qc.c);
+        result->debug_message("Increment would make x%d not satisfy its variable bounds.\n", qc.c);
         return false;
       }
     }
@@ -1754,7 +1722,7 @@ bool IncrementalIntervalAssignment::is_improvement(QElement &s,
   {
     if (!(s.valueA<t.valueA))
     {
-      log_message(DEBUG_MSG,"Increment would make x%d have unacceptable quality wrt its bounds.\n", s.c);
+      result->debug_message("Increment would make x%d have unacceptable quality wrt its bounds.\n", s.c);
       return false;
     }
   }
@@ -1821,7 +1789,7 @@ bool IncrementalIntervalAssignment::accept_strict_improvement(QWithReplacement &
       auto v = mrow.vals[ti]; // coefficient
       self_block_coeff=abs(v);
       
-      log_message(DEBUG_MSG,"x%d self-blocks with coeff %d.\n", c,v);
+      result->debug_message("x%d self-blocks with coeff %d.\n", c,v);
     }
   }
   
@@ -1843,7 +1811,7 @@ bool IncrementalIntervalAssignment::accept_strict_improvement(QWithReplacement &
         // debug
         // auto qn = qnew[i];
         // auto qo = qold[ti];
-        log_message(DEBUG_MSG,"x%d increment by %d blocks desired increment of x%d; adding it to blockers.\n", c, v, tc);
+        result->debug_message("x%d increment by %d blocks desired increment of x%d; adding it to blockers.\n", c, v, tc);
         // debug
       }
     }
@@ -1861,8 +1829,8 @@ bool IncrementalIntervalAssignment::accept_strict_improvement(QWithReplacement &
     // debug
     if (result->log_debug)
     {
-      log_message(DEBUG_MSG,"Rejecting increment of x%d=%d by %d * ", tc, col_solution[tc], dx);
-      mrow.print_row();
+      result->debug_message("Rejecting increment of x%d=%d by %d * ", tc, col_solution[tc], dx);
+      mrow.print_row(result);
     }
     // debug
     
@@ -1908,9 +1876,9 @@ bool IncrementalIntervalAssignment::accept_strict_improvement(QWithReplacement &
   // it improves min max t, accept it!
   if (result->log_debug)
   {
-    log_message(DEBUG_MSG,"Accepted increment of x%d from %d to %d via %d * ",
+    result->debug_message("Accepted increment of x%d from %d to %d via %d * ",
                 tc, col_solution[tc] - total_dx * mrow.vals[ti], col_solution[tc], total_dx);
-    mrow.print_row();
+    mrow.print_row(result);
     if (result->log_debug)
       print_solution("after accepted increment");
     else
@@ -1960,7 +1928,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
   // any step must stay within bounds
   // we improve towards the (floating point) goal intervals
   
-  log_message(DEBUG_MSG,"\nIIA: improving feasible solution towards goals.\n");
+  result->debug_message("\nIIA: improving feasible solution towards goals.\n");
   // use priority queue, variable farthest from its goal
   //   find a null-space-basis vector, or a linear sum of them, to move vars closer to their goals
   //   Strict improvement required at each step.
@@ -2020,10 +1988,10 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
     {
       ++iter;
       timer->cpu_secs(); // iter start
-      log_message(DEBUG_MSG,"iter %d ",iter);
+      result->debug_message("iter %d ",iter);
       if (0 && iter>max_iter)
       {
-        log_message(ERROR_MSG,"IIA: max_iter %d reached when trying to improve solution towards goals.\n",max_iter);
+        result->error_message("IIA: max_iter %d reached when trying to improve solution towards goals.\n",max_iter);
         break;
       }
     }
@@ -2038,16 +2006,16 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
     // debug
     if (result->log_debug)
     {
-      log_message(DEBUG_MSG,"\nIIA improve_solution: x%d priority %g, sol %d, attempting %+d towards ", t.c, t.valueA, t.solution, dx);
+      result->debug_message("\nIIA improve_solution: x%d priority %g, sol %d, attempting %+d towards ", t.c, t.valueA, t.solution, dx);
       if (tied_variables[t.c].size()>1)
       {
         double glo, ghi;
         compute_tied_goals(t.c, glo, ghi);
-        log_message(DEBUG_MSG,"tied goals [%g, %g]\n", glo, ghi);
+        result->debug_message("tied goals [%g, %g]\n", glo, ghi);
       }
       else
       {
-        log_message(DEBUG_MSG,"goal %g\n", goals[t.c]);
+        result->debug_message("goal %g\n", goals[t.c]);
       }
     }
     // debug
@@ -2129,15 +2097,15 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
       if (!fixed)
       {
         // if  (size_t)r+1<MV2.rows.size() then we can't reduce any more, but we can use the reduced MV2 to try to find an improvement vector
-        log_message(DEBUG_MSG,"\nIIA nullspace: No single nullspace vector gave strict improvement towards the goal of x%d\n", t.c);
+        result->debug_message("\nIIA nullspace: No single nullspace vector gave strict improvement towards the goal of x%d\n", t.c);
         if (give_up)
         {
-          log_message(DEBUG_MSG,"IIA nullspace: It's not possible to improve x%d. Giving up on this variable.\n", t.c);
+          result->debug_message("IIA nullspace: It's not possible to improve x%d. Giving up on this variable.\n", t.c);
           rc=false;
         }
         else if (M.col_rows[t.c].empty())
         {
-          log_message(DEBUG_MSG,"Variable x%d isn't in any nullspace row, so its impossible to improve!\n",t.c);
+          result->debug_message("Variable x%d isn't in any nullspace row, so its impossible to improve!\n",t.c);
           rc=false;
         }
         else
@@ -2159,8 +2127,8 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
               // debug
               if (result->log_debug)
               {
-                log_message(DEBUG_MSG,"Gaussian success, new row ");
-                R.print_row();
+                result->debug_message("Gaussian success, new row ");
+                R.print_row(result);
                 // M.print_matrix("new nullspace");
               }
               
@@ -2188,7 +2156,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
                   smallest_self_block_coeff=std::min(smallest_self_block_coeff,self_block_coeff);
                   if (smallest_self_block_coeff==1)
                   {
-                    log_message(DEBUG_MSG,"  Giving up! self_blocking coefficient is 1. latest self_block_coeff=%d.\n", smallest_self_block_coeff);
+                    result->debug_message("  Giving up! self_blocking coefficient is 1. latest self_block_coeff=%d.\n", smallest_self_block_coeff);
                     give_up=true;
                   }
                 }
@@ -2198,7 +2166,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
                   auto new_size = blocking_size(blocking_cols);
                   if (old_size==new_size)
                   {
-                    log_message(DEBUG_MSG,"  Giving up! blocking_cols size=%d didn't increase.\n", (int)new_size);
+                    result->debug_message("  Giving up! blocking_cols size=%d didn't increase.\n", (int)new_size);
                     give_up=true;
                     
                     // save the row for fine_tune
@@ -2213,12 +2181,12 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
               give_up=true;
               if (result->log_debug)
               {
-                log_message(DEBUG_MSG,"  Giving up! Gaussian elimination failed.\n");
+                result->debug_message("  Giving up! Gaussian elimination failed.\n");
                 if (result->log_debug)
                 {
-                  log_message(INFO_MSG,"MV2 r=%d reduced rows\n",r);
+                  result->info_message("MV2 r=%d reduced rows\n",r);
                   MV2.print_matrix("MV2");
-                  log_message(INFO_MSG,"all_blocking_cols ");
+                  result->info_message("all_blocking_cols ");
                   print_map(all_blocking_cols);
                 }
               }
@@ -2226,7 +2194,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
             
             if ( (size_t)r==MV2.rows.size())
             {
-              log_message(DEBUG_MSG,"  Giving up! there are no more rows to reduce\n");
+              result->debug_message("  Giving up! there are no more rows to reduce\n");
               give_up=true;
             }
           } while (!fixed && !give_up);
@@ -2238,10 +2206,10 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
             // debug
             if (0)
             {
-              log_message(INFO_MSG,"var x%d stuck at %d, not fixed ", t.c, t.solution);
+              result->info_message("var x%d stuck at %d, not fixed ", t.c, t.solution);
               if (give_up)
-                log_message(INFO_MSG,"giving up ");
-              // log_message(INFO_MSG,"Blocking self_block=%s num_block=%d cols ", (self_block ? "yes" : "no"), num_block);
+                result->info_message("giving up ");
+              // result->info_message("Blocking self_block=%s num_block=%d cols ", (self_block ? "yes" : "no"), num_block);
               // print_map(blocking_cols);
             }
             // debug
@@ -2251,30 +2219,30 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
           if (result->log_debug)
           {
             size_t num_new_rows = M.rows.size() - old_num_rows;
-            log_message(DEBUG_MSG,"IIA: nullspace: %lu rows added; was %lu, now %lu.\n",
+            result->debug_message("IIA: nullspace: %lu rows added; was %lu, now %lu.\n",
                         (unsigned long) num_new_rows,
                         (unsigned long) old_num_rows,
                         (unsigned long) M.rows.size());
             if (num_new_rows>0)
             {
-              log_message(INFO_MSG,"improve old last row + new rows\n");
+              result->info_message("improve old last row + new rows\n");
               const size_t i_start = (old_num_rows>0 ? old_num_rows-1 : 0);
               
               for (size_t i = i_start; i<M.rows.size(); ++i)
               {
-                log_message(DEBUG_MSG,"row %d ",(int)i);
-                M.rows[i].print_row();
+                result->debug_message("row %d ",(int)i);
+                M.rows[i].print_row(result);
               }
             }
-            log_message(DEBUG_MSG,"Blocking x columns = ");
+            result->debug_message("Blocking x columns = ");
             print_map(blocking_cols);
             if (fixed)
             {
-              log_message(DEBUG_MSG,"IIA nullspace: fixed x%d . We made a row with a non-zero coeff for it, but zero for the blocking cols.\n", t.c);
+              result->debug_message("IIA nullspace: fixed x%d . We made a row with a non-zero coeff for it, but zero for the blocking cols.\n", t.c);
             }
             else
             {
-              log_message(DEBUG_MSG,"IIA nullspace: FAILED to fix x%d . Blocking columns won. I'll keep trying to improve the other variables.\n\n", t.c);
+              result->debug_message("IIA nullspace: FAILED to fix x%d . Blocking columns won. I'll keep trying to improve the other variables.\n\n", t.c);
               // M.print_matrix("failed nullspaceD");
             }
           }
@@ -2312,7 +2280,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
     } // if (u<t)
     else
     {
-      log_message(DEBUG_MSG,"IIA goals Q: x%d can't seem to be any better than %d; its goal is %g. Giving up on it.\n",
+      result->debug_message("IIA goals Q: x%d can't seem to be any better than %d; its goal is %g. Giving up on it.\n",
                   t.c, col_solution[t.c],goals[t.c]);
     }
   } // while !Q.empty
@@ -2322,18 +2290,18 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
   // time on wasted iterations?
   if (result->log_debug)
   {
-    log_message(DEBUG_MSG, "Return code rc %d\n",rc);
+    result->debug_message( "Return code rc %d\n",rc);
     
     auto total_time = (time_wasted+time_improve);
     auto time_after_first_waste = total_time - time_first_wasted;
     if (time_first_wasted==-1.)
     {
-      log_message(DEBUG_MSG, "Improve solution, %d useful iteration time = %f (100 percent)\n",num_iter, total_time);
+      result->debug_message( "Improve solution, %d useful iteration time = %f (100 percent)\n",num_iter, total_time);
     }
     else
     {
       int num_wasted = num_iter-num_useful;
-      log_message(DEBUG_MSG,"Improve solution %d wasted iterations = %f (%f percent), %d useful iterations = %f (%f percent). %d time  %f (%f percent) on useful iterations before first failure, %d useful iterations after. total time %f (%f percent) after.\n",
+      result->debug_message("Improve solution %d wasted iterations = %f (%f percent), %d useful iterations = %f (%f percent). %d time  %f (%f percent) on useful iterations before first failure, %d useful iterations after. total time %f (%f percent) after.\n",
                   num_wasted, time_wasted, time_wasted*100. / total_time ,
                   num_useful,
                   time_improve, time_improve*100. / total_time,
@@ -2343,9 +2311,9 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
                   time_after_first_waste, time_after_first_waste*100. / total_time
                   );
     }
-    log_message(DEBUG_MSG,"section 0 time %f (%f fixed, %f not), section 1 time %f\n",time_0, time_0f, time_0not, time_1);
-    log_message(DEBUG_MSG,"section 0 accept_strict calls %lu, time %f\n",accept_calls,accept_time);
-    log_message(DEBUG_MSG,"number of rows: start %lu, end %lu\n", M_rows_init, M.rows.size() );
+    result->debug_message("section 0 time %f (%f fixed, %f not), section 1 time %f\n",time_0, time_0f, time_0not, time_1);
+    result->debug_message("section 0 accept_strict calls %lu, time %f\n",accept_calls,accept_time);
+    result->debug_message("number of rows: start %lu, end %lu\n", M_rows_init, M.rows.size() );
     delete timer;
     delete timer_0;
     delete timer_1;
@@ -2356,7 +2324,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
   // debug
 //  if (0)
 //  {
-//    log_message(INFO_MSG,"Nullspace after done adding rows to improve solution: \n");
+//    result->info_message("Nullspace after done adding rows to improve solution: \n");
 //    M.print_matrix();
 //    print_solution("improved solution"); // for col_names
 //  }
@@ -2365,7 +2333,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
   // debug
   if (result->log_debug)
   {
-    log_message(DEBUG_MSG,"IIA goal Q empty.\n");
+    result->debug_message("IIA goal Q empty.\n");
     if (result->log_debug)
       print_solution("improved solution");
     else
@@ -2483,8 +2451,8 @@ void IncrementalIntervalAssignment::fine_tune(MatrixSparseInt&M, MatrixSparseInt
         if (is_better(qnew,qold))
         {
           improved = true;
-//          log_message(INFO_MSG,"fine tune made an improvement using row %ul = ", (unsigned int) i);
-//          R.print_row();
+//          result->info_message("fine tune made an improvement using row %ul = ", (unsigned int) i);
+//          R.print_row(result);
           continue;
         }
       }
@@ -2496,8 +2464,8 @@ void IncrementalIntervalAssignment::fine_tune(MatrixSparseInt&M, MatrixSparseInt
         if (is_better(qnew,qold))
         {
           improved = true;
-//          log_message(INFO_MSG,"fine tune made an improvement using row %ul = ", (unsigned int) i);
-//          R.print_row();
+//          result->info_message("fine tune made an improvement using row %ul = ", (unsigned int) i);
+//          R.print_row(result);
           continue;
         }
       }
@@ -2552,11 +2520,11 @@ void IncrementalIntervalAssignment::categorize_vars(std::vector<int>&col_order,s
   
   if (result->log_debug)
   {
-    log_message(INFO_MSG,"Categorize_vars\n");
-    log_message(INFO_MSG,"Dependent rows: ");   print_vec(rows_dep);
-    log_message(INFO_MSG,"Dependent vars: ");   print_vec(cols_dep);
-    log_message(INFO_MSG,"Independent vars: "); print_vec(cols_ind);
-    log_message(INFO_MSG,"\n");
+    result->info_message("Categorize_vars\n");
+    result->info_message("Dependent rows: ");   print_vec(result, rows_dep);
+    result->info_message("Dependent vars: ");   print_vec(result, cols_dep);
+    result->info_message("Independent vars: "); print_vec(result, cols_ind);
+    result->info_message("\n");
   }
 }
 
@@ -2629,10 +2597,10 @@ bool IncrementalIntervalAssignment::assign_dependent_vars(const std::vector<int>
       OK=false;
       ++col_solution[col_dep];
       cols_fail.push_back(col_dep);
-      log_message(DEBUG_MSG,"IIA dependent var x%d = %d/%d != integer. Rounding up.\n",
+      result->debug_message("IIA dependent var x%d = %d/%d != integer. Rounding up.\n",
                       col_dep, -sum, coeff_dep);
     }
-    log_message(DEBUG_MSG,"IIA Assigning dependent var x%d = %d/%d = %d\n",
+    result->debug_message("IIA Assigning dependent var x%d = %d/%d = %d\n",
                     col_dep, -sum, coeff_dep, col_solution[col_dep]);
   }
   if (result->log_debug)
@@ -2640,8 +2608,8 @@ bool IncrementalIntervalAssignment::assign_dependent_vars(const std::vector<int>
     print_solution("after assigning dependent variables");
     if (!cols_fail.empty())
     {
-      log_message(INFO_MSG,"failed-to-assign variables, cols_fail A");
-      print_vec(cols_fail);
+      result->info_message("failed-to-assign variables, cols_fail A");
+      print_vec(result, cols_fail);
     }
   }
 
@@ -2683,12 +2651,12 @@ bool IncrementalIntervalAssignment::generate_tied_data()
     }
     if (lo>hi)
     {
-      log_message(WARNING_MSG,"Infeasible interval bounds: interval bound ranges do not overlap for intervals that are constrained to be identical.\n");
+      result->warning_message("Infeasible interval bounds: interval bound ranges do not overlap for intervals that are constrained to be identical.\n");
       // to do, print something about the ids of the entities for the user
       if (result->log_debug)
       {
-        log_message(INFO_MSG,"Tied variables = ");
-        print_vec(tied_variables[c]);
+        result->info_message("Tied variables = ");
+        print_vec(result, tied_variables[c]);
       }
       return false;
     }
@@ -2755,8 +2723,8 @@ bool IncrementalIntervalAssignment::create_nullspace(const std::vector<int>&cols
     L=lcm(L,v);
   }
   
-  log_message(DEBUG_MSG,"creating nullspace\n");
-  log_message(DEBUG_MSG,"lcm=%d\n",L);
+  result->debug_message("creating nullspace\n");
+  result->debug_message("lcm=%d\n",L);
   
   if (L==0)
     return false;
@@ -2770,7 +2738,7 @@ bool IncrementalIntervalAssignment::create_nullspace(const std::vector<int>&cols
     
     auto &row = M.rows[i];
 
-    // log_message(INFO_MSG,"Filling in row %d from matrix column %d\n",(int)i,c);
+    // result->info_message("Filling in row %d from matrix column %d\n",(int)i,c);
     // grab the entries for the independent vars
     // transform from row index to cols_dep index
     // row.cols=col_rows[c];
@@ -2780,7 +2748,7 @@ bool IncrementalIntervalAssignment::create_nullspace(const std::vector<int>&cols
       row.cols[j]=cols_dep[ col_rows[c][j] ];
     }
     row.vals=column_values(c);
-    // log_message(INFO_MSG,"intial "); row.print_row();
+    // result->info_message("intial "); row.print_row(result);
     
     // multiply by -1 * L / leading value of row
     for (size_t j = 0; j < row.vals.size(); ++j)
@@ -2791,17 +2759,17 @@ bool IncrementalIntervalAssignment::create_nullspace(const std::vector<int>&cols
       const auto rr=rows_dep[cc];
       const auto lead=rows[rr].get_val( cols_dep[rr] );
       auto &vv=row.vals[j];
-      // log_message(INFO_MSG,"  old value = %d\n",vv);
+      // result->info_message("  old value = %d\n",vv);
       assert( abs(L) % abs(lead) == 0 );
       vv*= -L / lead;
       
-//      log_message(INFO_MSG,"j=%d, row.vals[%d]=%d",(int)j,(int)j, vv);
-//      log_message(INFO_MSG,"  permuted col=%d, original matrix row index=%d=%d ", c, cc, rr); rows[rr].print_row();
-//      log_message(INFO_MSG,"  lead=rows[%d].get_val(%d)=%d\n",rr,cols_dep[rr],lead);
-//      log_message(INFO_MSG,"  new value = %d\n",vv);
+//      result->info_message("j=%d, row.vals[%d]=%d",(int)j,(int)j, vv);
+//      result->info_message("  permuted col=%d, original matrix row index=%d=%d ", c, cc, rr); rows[rr].print_row(result);
+//      result->info_message("  lead=rows[%d].get_val(%d)=%d\n",rr,cols_dep[rr],lead);
+//      result->info_message("  new value = %d\n",vv);
     }
     
-    // log_message(INFO_MSG,"after multiply by row_dep / leading value of "); row.print_row();
+    // result->info_message("after multiply by row_dep / leading value of "); row.print_row(result);
 
     // grap the entries for the dependent vars
     // append column of identity matrix, times L
@@ -2811,8 +2779,8 @@ bool IncrementalIntervalAssignment::create_nullspace(const std::vector<int>&cols
     row.sort();
 
     row_simplify_vals(row.vals);
-    // log_message(INFO_MSG,"after simplify "); row.print_row();
-    // log_message(INFO_MSG,"\n");
+    // result->info_message("after simplify "); row.print_row(result);
+    // result->info_message("\n");
   }
   M.fill_in_cols_from_rows();
   MaxMrow=M.rows.size();
@@ -2892,7 +2860,7 @@ bool MatrixSparseInt::coefficient_irreducible(int col, int max_coeff)
   }
   if (g>=max_coeff)
   {
-    log_message(DEBUG_MSG,"The gcd of all of x%d's coefficients is too large: %d >= %d.\n", col, g, max_coeff);
+    result->debug_message("The gcd of all of x%d's coefficients is too large: %d >= %d.\n", col, g, max_coeff);
     return true;
   }
   
@@ -2962,7 +2930,7 @@ bool MatrixSparseInt::coefficient_irreducible(int col, int max_coeff)
         }
         if (!is_ok)
         {
-          log_message(DEBUG_MSG,"The ratio of x%d's coefficients is x%d is %d to %d in every row.\n", col, c, old_vcol, old_vc);
+          result->debug_message("The ratio of x%d's coefficients is x%d is %d to %d in every row.\n", col, c, old_vcol, old_vc);
           return true;
         }
       }
@@ -3030,14 +2998,14 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
     else
       print_matrix_summary("Starting Gaussian elimination");
     
-    log_message(DEBUG_MSG,"Trying to diagonalize %lu columns ", (long unsigned) blocking_cols.size());
+    result->debug_message("Trying to diagonalize %lu columns ", (long unsigned) blocking_cols.size());
     print_map(blocking_cols);
     
-    log_message(DEBUG_MSG,"%d rows of %d already diagonalized\n", r, (int) rows.size());
-    log_message(DEBUG_MSG,"Already diagonalize %lu columns ", (long unsigned) all_blocking_cols.size());
+    result->debug_message("%d rows of %d already diagonalized\n", r, (int) rows.size());
+    result->debug_message("Already diagonalize %lu columns ", (long unsigned) all_blocking_cols.size());
     print_map(all_blocking_cols);
-    log_message(DEBUG_MSG,"Since last call we've improved %lu columns ", (long unsigned) improved_cols.size());
-    print_map(improved_cols);
+    result->debug_message("Since last call we've improved %lu columns ", (long unsigned) improved_cols.size());
+    ::IIA_Internal::print_map(result,improved_cols);
   }
   // debug
 
@@ -3072,7 +3040,7 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
       if (result->log_debug)
       {
         auto num_removed = old_all_block_size - all_blocking_cols.size();
-        log_message(INFO_MSG,"all_blocking_cols smaller by %lu\n", (unsigned long) num_removed);
+        result->info_message("all_blocking_cols smaller by %lu\n", (unsigned long) num_removed);
         if (num_removed)
         {
           if (result->log_debug)
@@ -3080,8 +3048,8 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
           else
             print_matrix_summary("gaussian ");
           
-          log_message(DEBUG_MSG,"%d rows of %d remain diagonalized\n", r, (int) rows.size());
-          log_message(DEBUG_MSG,"remaining diagonalize %lu columns ", (long unsigned) all_blocking_cols.size());
+          result->debug_message("%d rows of %d remain diagonalized\n", r, (int) rows.size());
+          result->debug_message("remaining diagonalize %lu columns ", (long unsigned) all_blocking_cols.size());
           print_map(all_blocking_cols);
         }
       }
@@ -3104,12 +3072,12 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
     unblocked_row=-1; // row we can increment by
     for (int lead : new_blocking_cols) // col we're working on
     {
-      log_message(DEBUG_MSG,"reducing row %d col %d\n",r,lead);
+      result->debug_message("reducing row %d col %d\n",r,lead);
       
       // out of rows to reduce
       if ((size_t)r==rows.size())
       {
-        log_message(DEBUG_MSG, "Perdu! Stuck! We already reduced every row!"); // diagonalize a different row here, too
+        result->debug_message( "Perdu! Stuck! We already reduced every row!"); // diagonalize a different row here, too
         break; // but still search for an OK row, as is we succeeded
       }
       
@@ -3230,7 +3198,7 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
       }
       
       // do the reduce on col lead and row rr
-      log_message(DEBUG_MSG,"matrix_row_eliminate using row %d to kill col %d\n",rr, lead);
+      result->debug_message("matrix_row_eliminate using row %d to kill col %d\n",rr, lead);
       
       // pivot
       matrix_row_swap(rr,r);
@@ -3239,7 +3207,7 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
       
       if (result->log_debug)
       {
-        log_message(DEBUG_MSG,"Done reducing row %d and col %d\n",r,lead);
+        result->debug_message("Done reducing row %d and col %d\n",r,lead);
         if (result->log_debug)
           print_matrix("done row col");
         else
@@ -3250,11 +3218,11 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
       assert( col_rows[lead].size()==1 && col_rows[lead][0]==r);
       if (col_rows[lead].size()!=1 || col_rows[lead][0]!=r)
       {
-        log_message(ERROR_MSG,"IIA: Failed Gaussian elimination\n");
+        result->error_message("IIA: Failed Gaussian elimination\n");
         if (result->log_debug)
         {
           print_matrix("Failed Gaussian elimination");
-          log_message(DEBUG_MSG,"  Gaussian elimination must have an implementation error. Failed to remove column %d from all rows except %d.\n",lead,r);
+          result->debug_message("  Gaussian elimination must have an implementation error. Failed to remove column %d from all rows except %d.\n",lead,r);
         }
         return false;
       }
@@ -3269,7 +3237,7 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
   
   if (result->log_debug)
   {
-    log_message(DEBUG_MSG,"Gaussian elimination finished\n");
+    result->debug_message("Gaussian elimination finished\n");
     if (result->log_debug)
       print_matrix("Gaussian elimination finished");
   }
@@ -3293,8 +3261,8 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
       {
         if (result->log_debug)
         {
-          log_message(DEBUG_MSG,"Row %d has zero coefficients for all the blocking columns and small x%d coefficient %d ",cr, col, c_coeff);
-          rows[cr].print_row();
+          result->debug_message("Row %d has zero coefficients for all the blocking columns and small x%d coefficient %d ",cr, col, c_coeff);
+          rows[cr].print_row(result);
         }
         
         // return first unblocked row
@@ -3306,8 +3274,8 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
         rows_large_coeff.insert(cr);
         if (result->log_debug)
         {
-          log_message(DEBUG_MSG,"Row %d has a big x%d coefficient %d>=%d",cr,col,c_coeff,max_coeff);
-          rowcr.print_row();
+          result->debug_message("Row %d has a big x%d coefficient %d>=%d",cr,col,c_coeff,max_coeff);
+          rowcr.print_row(result);
         }
       }
     }
@@ -3317,7 +3285,7 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
       // debug
       if (print_first)
       {
-        log_message(DEBUG_MSG,"every row with small col %d coefficient had a non-zero coefficient for some blocking column\n",col);
+        result->debug_message("every row with small col %d coefficient had a non-zero coefficient for some blocking column\n",col);
         print_first=false;
       }
       // debug
@@ -3334,8 +3302,8 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
         {
           if (result->log_debug)
           {
-            log_message(DEBUG_MSG,"Row %d has acceptable (but not zero) coefficients for the blocking columns and small %d coefficient %d ",cr, col, c_coeff);
-            rows[cr].print_row();
+            result->debug_message("Row %d has acceptable (but not zero) coefficients for the blocking columns and small %d coefficient %d ",cr, col, c_coeff);
+            rows[cr].print_row(result);
           }
           
           // save first unblocked row
@@ -3357,7 +3325,7 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
   {
     if (coefficient_irreducible(col,max_coeff))
     {
-      log_message(DEBUG_MSG,"It's impossible to reduce the coefficient of x%d below %d.\n", col, max_coeff);
+      result->debug_message("It's impossible to reduce the coefficient of x%d below %d.\n", col, max_coeff);
       return false;
     }
   }
@@ -3373,8 +3341,8 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
         if (result->log_debug)
         {
           int c_coeff = abs(rows[cr].get_val(col));
-          log_message(DEBUG_MSG, "Final coefficient reduction success! row %d x%d coeff %d<%d ", cr, col, c_coeff, max_coeff);
-          rows[cr].print_row();
+          result->debug_message( "Final coefficient reduction success! row %d x%d coeff %d<%d ", cr, col, c_coeff, max_coeff);
+          rows[cr].print_row(result);
         }
         unblocked_row=cr;
         return true;
@@ -3382,7 +3350,7 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
     }
     else
     {
-      log_message(WARNING_MSG,"IIA: Gaussian elimination to both reduce_coefficient and fix blocking cols is not implemented.\n");
+      result->warning_message("IIA: Gaussian elimination to both reduce_coefficient and fix blocking cols is not implemented.\n");
       // tests that hit this warning:
       // cubit100.test : lecture3.jou  lecture9.jou  lecture10.jou
       // to find them all, just change the warning to an error and run the test suite
@@ -3394,11 +3362,11 @@ bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking
   {
     if (max_coeff<std::numeric_limits<int>::max())
     {
-      log_message(DEBUG_MSG,"IIA: Gaussian elimination unable to find an unblocked vector with a small enough coefficient (<%d) for x%d.\n",max_coeff, col);
+      result->debug_message("IIA: Gaussian elimination unable to find an unblocked vector with a small enough coefficient (<%d) for x%d.\n",max_coeff, col);
     }
     else
     {
-      log_message(DEBUG_MSG,"IIA: Gaussian elimination unable to find an unblocked vector for x%d.\n", col);
+      result->debug_message("IIA: Gaussian elimination unable to find an unblocked vector for x%d.\n", col);
     }
   }
   // debug
@@ -3448,22 +3416,22 @@ bool MatrixSparseInt::is_row_blocked(int row, int col, const BlockingCols &block
       {
         if (result->log_debug)
         {
-          log_message(DEBUG_MSG,"Row %d is blocked by x%d coefficient %d ",row, cc, cc_coeff);
+          result->debug_message("Row %d is blocked by x%d coefficient %d ",row, cc, cc_coeff);
           const auto lo = bcc->second.first;
           const auto hi = bcc->second.second;
           if (lo==block_min)
           {
-            log_message(DEBUG_MSG," >= %d\n", hi);
+            result->debug_message(" >= %d\n", hi);
           }
           else if (hi==block_max)
           {
-            log_message(DEBUG_MSG," <= %d\n", lo);
+            result->debug_message(" <= %d\n", lo);
           }
           else
           {
-            log_message(DEBUG_MSG,"outside (%d,%d)\n", lo, hi);
+            result->debug_message("outside (%d,%d)\n", lo, hi);
           }
-          rowcr.print_row();
+          rowcr.print_row(result);
         }
         return true;
       }
@@ -3471,8 +3439,8 @@ bool MatrixSparseInt::is_row_blocked(int row, int col, const BlockingCols &block
   }
   if (result->log_debug)
   {
-    log_message(DEBUG_MSG,"Row %d has acceptable (but perhaps non-zero) coefficients for all the blocking columns", row);
-    rowcr.print_row();
+    result->debug_message("Row %d has acceptable (but perhaps non-zero) coefficients for all the blocking columns", row);
+    rowcr.print_row(result);
   }
   return false; // success, it isn't blocked
 }
@@ -3485,13 +3453,13 @@ bool MatrixSparseInt::reduce_coefficient(int row, int col, int r, int max_coeff)
   {
     auto &roww=rows[row];
     int c_coeff=roww.get_val(col);
-    log_message(DEBUG_MSG,"IIA: Gaussian elimination removed the blocking variables from row %d, but the x%d coefficient is too big, %d>=%d.\n",row,col,abs(c_coeff),max_coeff);
-    rows[row].print_row();
+    result->debug_message("IIA: Gaussian elimination removed the blocking variables from row %d, but the x%d coefficient is too big, %d>=%d.\n",row,col,abs(c_coeff),max_coeff);
+    rows[row].print_row(result);
   }
 
   // If this line is hit, then it would make a good test case for gaussian_elimination to reduce coefficients.
-  log_message(WARNING_MSG,"IIA: Gaussian elimination, getting the leading coefficient smaller may be possible, but this is not implemented yet.\n");
-  log_message(WARNING_MSG,"Interval Matching: encountered a case that is theoretically possible but not encountered before in practice. Please share this example journal file to Scott A. Mitchell.\n");
+  result->warning_message("IIA: Gaussian elimination, getting the leading coefficient smaller may be possible, but this is not implemented yet.\n");
+  result->warning_message("Interval Matching: encountered a case that is theoretically possible but not encountered before in practice. Please share this example journal file to Scott A. Mitchell.\n");
 
   return false; // not implemented, because we have no test cases that need it
   
@@ -3540,7 +3508,7 @@ std::vector<int> IncrementalIntervalAssignment::column_values(int c)
   return vals;
 }
 
-void IncrementalIntervalAssignment::SetValuesOneCoeff::set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe )
+void IncrementalIntervalAssignment::SetValuesOneCoeff::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
 {
   // valuesA = has only one coefficient, of value 1
   // valuesB = has a goal of 0 (is a slack variable)
@@ -3550,23 +3518,23 @@ void IncrementalIntervalAssignment::SetValuesOneCoeff::set_values_implementation
   qe.valueC=0.;
   
   const int c = qe.c;
-  if (IIA.col_rows[c].size()==1)
+  if (iia.col_rows[c].size()==1)
   {
-    const int cr = IIA.col_rows[c][0];
-    const int c_coeff = IIA.rows[cr].get_val(c);
+    const int cr = iia.col_rows[c][0];
+    const int c_coeff = iia.rows[cr].get_val(c);
     if (abs(c_coeff)==1)
     {
       qe.valueA=1.;
       qe.valueB= (qe.valueC==0. ? 1 : 0);
       // pick based on lower goal, unsure what's best
       double glo, ghi;
-      IIA.compute_tied_goals(c,glo,ghi);
+      iia.compute_tied_goals(c,glo,ghi);
       qe.valueC=glo;
     }
   }
 }
 
-void IncrementalIntervalAssignment::SetValuesNumCoeff::set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe )
+void IncrementalIntervalAssignment::SetValuesNumCoeff::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
 {
   // valuesA = -number of coefficients
   // valuesB = -smallest coefficient magnitude
@@ -3576,25 +3544,25 @@ void IncrementalIntervalAssignment::SetValuesNumCoeff::set_values_implementation
   
   const int c = qe.c;
   // valueA
-  qe.valueA = - ((int) IIA.col_rows[c].size());
+  qe.valueA = - ((int) iia.col_rows[c].size());
   // valueB
   {
     int smallest_coeff = std::numeric_limits<int>::max();
-    for (auto r : IIA.col_rows[c])
+    for (auto r : iia.col_rows[c])
     {
-      const int c_coeff = abs(IIA.rows[r].get_val(c));
+      const int c_coeff = abs(iia.rows[r].get_val(c));
       smallest_coeff = std::min( smallest_coeff, c_coeff );
     }
     qe.valueB = -smallest_coeff;
   }
   // valueC
-  if (c<(int)IIA.intVar_end()) // edge
+  if (c<(int)iia.intVar_end()) // edge
   {
     double glo, ghi;
-    IIA.compute_tied_goals(c,glo,ghi);
+    iia.compute_tied_goals(c,glo,ghi);
     qe.valueC=glo; // prefer longer ones
   }
-  else if (c<(int)IIA.sumEvenDummies_end())  // sum-even
+  else if (c<(int)iia.sumEvenDummies_end())  // sum-even
   {
     if (fabs(qe.valueB)!=1)
     {
@@ -3607,7 +3575,7 @@ void IncrementalIntervalAssignment::SetValuesNumCoeff::set_values_implementation
   {
     // distinguish equality slack (bad to pick) from inequality slack (OK to pick)
     // equality slack
-    if (IIA.col_lower_bounds[c]==IIA.col_upper_bounds[c])
+    if (iia.col_lower_bounds[c]==iia.col_upper_bounds[c])
     {
       // undesireable, highly constrained to a single value. want it to be independent so it's isolated in its own nullspace row, not dependent on any other slacks
       qe.valueA = std::numeric_limits<int>::lowest()/2; // this way it will never get picked, even if it is in only one row
@@ -3616,7 +3584,7 @@ void IncrementalIntervalAssignment::SetValuesNumCoeff::set_values_implementation
   }
 }
 
-void IncrementalIntervalAssignment::SetValuesCoeffRowsGoal::set_values_implementation(IncrementalIntervalAssignment &IIA, QElement &qe )
+void IncrementalIntervalAssignment::SetValuesCoeffRowsGoal::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
 {
   // valuesA = value of smallest coefficient
   // valuesB = number of rows it appears in
@@ -3626,11 +3594,11 @@ void IncrementalIntervalAssignment::SetValuesCoeffRowsGoal::set_values_implement
   qe.valueC=0.;
   
   const int c = qe.c;
-  qe.valueB = IIA.col_rows[c].size();
+  qe.valueB = iia.col_rows[c].size();
   int best_coeff=std::numeric_limits<int>::max();
-  for (int r : IIA.col_rows[c])
+  for (int r : iia.col_rows[c])
   {
-    const int c_coeff = abs(IIA.rows[r].get_val(c));
+    const int c_coeff = abs(iia.rows[r].get_val(c));
     if (c_coeff<best_coeff)
     {
       best_coeff=c_coeff;
@@ -3638,7 +3606,7 @@ void IncrementalIntervalAssignment::SetValuesCoeffRowsGoal::set_values_implement
   }
   qe.valueA=-best_coeff;
   double glo, ghi;
-  IIA.compute_tied_goals(c,glo,ghi);
+  iia.compute_tied_goals(c,glo,ghi);
   qe.valueC = (glo==0. ? std::numeric_limits<int>::max()/2 : glo);
 }
 
@@ -3662,7 +3630,7 @@ void IncrementalIntervalAssignment::SetValuesCoeffRowsGoal::set_values_implement
 bool IncrementalIntervalAssignment::rref_elim(int &r, int rr, int c, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
 {
   const bool do_print = false; // debug bool do_print = (c==1354);
-  if (do_print) log_message(DEBUG_MSG," rref filling in row %d (diagonal is col %d) ", r, c );
+  if (do_print) result->debug_message(" rref filling in row %d (diagonal is col %d) ", r, c );
   
   row_swap(r,rr); // now we're working on r, not rr
   
@@ -3700,8 +3668,8 @@ bool IncrementalIntervalAssignment::rref_elim(int &r, int rr, int c, std::vector
   // debug
   if (do_print && result->log_debug)
   {
-    log_message(INFO_MSG,"rref_elim row %d ",r);
-    rows[r].print_row();
+    result->info_message("rref_elim row %d ",r);
+    rows[r].print_row(result);
   }
   // debug
   
@@ -3713,9 +3681,9 @@ bool IncrementalIntervalAssignment::rref_elim(int &r, int rr, int c, std::vector
   // For general matrics there is at most one non-zero, and for IA matrices exactly one non-zero
   if (col_rows[c].size()!=1)
   {
-    log_message(ERROR_MSG,"IIA: RREF failure, unable to get a single non-zero column for dependent variable %d\n",c);
-    log_message(INFO_MSG,"col %d rows = ",c);
-    print_vec(col_rows[c]);
+    result->error_message("IIA: RREF failure, unable to get a single non-zero column for dependent variable %d\n",c);
+    result->info_message("col %d rows = ",c);
+    print_vec(result, col_rows[c]);
     print_problem("RREF stuck case");
     return false;
   }
@@ -3736,7 +3704,7 @@ int RowSparseInt::get_col_index(int c) const
 
 bool IncrementalIntervalAssignment::rref_step0(int &rref_r, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
 {
-  log_message(DEBUG_MSG,"rref_step0\n");
+  result->debug_message("rref_step0\n");
   // Collect vars that are already reduced
   // Use any var that has a "1" for a coefficient, and there is only one row that contains that variable
   std::priority_queue<QElement> Q;
@@ -3768,7 +3736,7 @@ bool IncrementalIntervalAssignment::rref_step0(int &rref_r, std::vector<int> &rr
 
 bool IncrementalIntervalAssignment::rref_step_numrows(int &rref_r, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
 {
-  log_message(DEBUG_MSG,"rref_step_numrows\n");
+  result->debug_message("rref_step_numrows\n");
   std::priority_queue<QElement> Q;
   SetValuesNumCoeff val_NumCoeff;
   std::vector<int>all_vars(used_col+1);
@@ -3815,11 +3783,11 @@ bool IncrementalIntervalAssignment::rref_step_numrows(int &rref_r, std::vector<i
 
 void IncrementalIntervalAssignment::dump_var(int c)
 {
-  log_message(INFO_MSG,"dump_var %d\n", c);
-  print_colIIA(c);
+  result->info_message("dump_var %d\n", c);
+  print_col_iia(c);
   for (auto r : col_rows[c])
-    print_rowIIA(r);
-  log_message(INFO_MSG,"dump_var %d end\n", c);
+    print_row_iia(r);
+  result->info_message("dump_var %d end\n", c);
 }
 
 bool IncrementalIntervalAssignment::rref_step1(int &rref_r, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
@@ -3827,7 +3795,7 @@ bool IncrementalIntervalAssignment::rref_step1(int &rref_r, std::vector<int> &rr
   if (rref_r>used_row)
     return true;
 
-  log_message(DEBUG_MSG,"rref_step1\n");
+  result->debug_message("rref_step1\n");
   // Use any var that has a "1" for a coefficient in a row,
   
   std::priority_queue<QElement> Q;
@@ -3853,7 +3821,7 @@ bool IncrementalIntervalAssignment::rref_step1(int &rref_r, std::vector<int> &rr
     
     all_vars.clear();
     
-    log_message(DEBUG_MSG,"Trying %d candidate columns\n",(int)Q.size());
+    result->debug_message("Trying %d candidate columns\n",(int)Q.size());
     
     bool progress_since_pushback=false;
     QElement t;
@@ -3864,7 +3832,7 @@ bool IncrementalIntervalAssignment::rref_step1(int &rref_r, std::vector<int> &rr
       
       const int c = t.c;
       
-      // log_message(INFO_MSG,"processing t, col %d, valA %g, valB %g, valC %g\n",t.c,t.valueA,t.valueB,t.valueC);
+      // result->info_message("processing t, col %d, valA %g, valB %g, valC %g\n",t.c,t.valueA,t.valueB,t.valueC);
       
       // rr row to move into r
       // find the one with a lead coeff of 1, if any
@@ -3935,7 +3903,7 @@ bool IncrementalIntervalAssignment::rref_step2(int &rref_r, std::vector<int> &rr
   if (rref_r>used_row)
     return true;
   
-  log_message(DEBUG_MSG,"rref_step2\n");
+  result->debug_message("rref_step2\n");
   // eliminate in order of increasing gcd (decreasing -gcd)
   // find the gcd of all columns, store in a priority queue, and add a new Q entry for the changed columns when we do a row-eliminate
   
@@ -3952,7 +3920,7 @@ bool IncrementalIntervalAssignment::rref_step2(int &rref_r, std::vector<int> &rr
       int g = gcd_col(rref_r,c);
       if (g>0)
       {
-        // log_message(INFO_MSG,"gcd_to_cols.insert <%d, %d>\n", g, c);
+        // result->info_message("gcd_to_cols.insert <%d, %d>\n", g, c);
         Q.emplace(-g,c);
       }
     }
@@ -3963,7 +3931,7 @@ bool IncrementalIntervalAssignment::rref_step2(int &rref_r, std::vector<int> &rr
   {
     auto gc=Q.top();
     Q.pop();
-    // log_message(INFO_MSG,"popped <%d, %d>, remaining size %d\n", -gc.first, gc.second, (int)Q.size());
+    // result->info_message("popped <%d, %d>, remaining size %d\n", -gc.first, gc.second, (int)Q.size());
 
     // tip top, update val
     int c = gc.second;
@@ -3973,7 +3941,7 @@ bool IncrementalIntervalAssignment::rref_step2(int &rref_r, std::vector<int> &rr
     {
       if (g>-gc.first)
       {
-        // log_message(INFO_MSG,"reinsert gcd_to_cols.insert <%d, %d>\n", g, c);
+        // result->info_message("reinsert gcd_to_cols.insert <%d, %d>\n", g, c);
         Q.emplace(-g,c); // reinsert in queue
       }
       else
@@ -4016,11 +3984,11 @@ bool IncrementalIntervalAssignment::rref_step2(int &rref_r, std::vector<int> &rr
         // ok, we're working with row r
         // keep multiplying it and subtracting the multiple of other rows until we get down to their gcd
         auto &row=rows[rref_r];
-        // log_message(INFO_MSG,"working with row %d ", r); row.print_row();
+        // result->info_message("working with row %d ", r); row.print_row(result);
         auto &row_vals=rows[rref_r].vals;
         int ci = row.get_col_index(c);
         auto &c_coeff=row_vals[ci];
-        // log_message(INFO_MSG,"coeff of col %d is %d\n", c, c_coeff);
+        // result->info_message("coeff of col %d is %d\n", c, c_coeff);
 
         // find subset of rows to work with
         //   ri points to row r
@@ -4032,14 +4000,14 @@ bool IncrementalIntervalAssignment::rref_step2(int &rref_r, std::vector<int> &rr
         // for all the remaining rows, until we get c_coeff minimal
         while (abs(c_coeff)>g && ri+1<(int)cr.size())
         {
-          // log_message(INFO_MSG,"Coeff not minimal, |coeff|>g, |%d|>%d\n", c_coeff, g);
+          // result->info_message("Coeff not minimal, |coeff|>g, |%d|>%d\n", c_coeff, g);
 
           int rr=cr[++ri]; // next row to multiply and subtract
           assert(rr>rref_r);
           int cc_coeff=rows[rr].get_val(c); // coeff of c in that row
           if (abs(c_coeff)>=abs(cc_coeff))
           {
-            log_message(ERROR_MSG,"why am I working with row %d coeff %d, when I could have been using row %d coeff %d?\n", rref_r, c_coeff, rr, cc_coeff);
+            result->error_message("why am I working with row %d coeff %d, when I could have been using row %d coeff %d?\n", rref_r, c_coeff, rr, cc_coeff);
             print_problem("bad rref");
             return false;
           }
@@ -4065,12 +4033,12 @@ bool IncrementalIntervalAssignment::rref_step2(int &rref_r, std::vector<int> &rr
           assert(c_coeff==new_m*gg);
           if(c_coeff!=new_m*gg) // some coding mistake? or weird coefficients?
           {
-            log_message(ERROR_MSG,"IIA: some coding mistake in rref_step2, unexpected value after matrix row algebra.\n");
+            result->error_message("IIA: some coding mistake in rref_step2, unexpected value after matrix row algebra.\n");
             return false;
           }
         }
-        // log_message(INFO_MSG,"final coeff of col %d is %d\n", c, c_coeff);
-        // log_message(INFO_MSG,"final row r %d is",r); row.print_row();
+        // result->info_message("final coeff of col %d is %d\n", c, c_coeff);
+        // result->info_message("final row r %d is",r); row.print_row(result);
 
         // do the elimination
         if (!rref_elim(rref_r, rref_r, c, rref_col_order, rref_col_map))
@@ -4087,7 +4055,7 @@ bool IncrementalIntervalAssignment::rref_step2(int &rref_r, std::vector<int> &rr
 
 bool IncrementalIntervalAssignment::rref_stepZ(int &rref_r, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
 {
-  log_message(DEBUG_MSG,"rref_stepZ\n");
+  result->debug_message("rref_stepZ\n");
   for (int c=0; c<=used_col; ++c)
   {
     if (rref_r>used_row)
@@ -4268,7 +4236,7 @@ void IncrementalIntervalAssignment::row_swap(int r, int s)
   if (names_exist())
     row_names[r].swap(row_names[s]);
 
-  // swap data from IntervalProblem
+  // swap data from IncrementalIntervalAssignment
   if (parentProblem)
   {
     std::swap(parentRows[r],parentRows[s]);
@@ -4499,12 +4467,12 @@ void MatrixSparseInt::matrix_row_us_minus_vr(const RowSparseInt &r_row, RowSpars
         {
           // let variable r_cols[i] know that it no longer has a non-zero in row s
           auto &crow = (*col_rows_loc)[r_cols[i]];
-          // log_message(INFO_MSG,"column %d's rows, before removing row %d\n",r_cols[i],s); print_vec(crow);
+          // result->info_message("column %d's rows, before removing row %d\n",r_cols[i],s); print_vec(result, crow);
           // remove s from crow, maintaining the sort
           auto next = std::upper_bound(crow.begin(),crow.end(),s);
           std::move(next,crow.end(),prev(next));
           crow.pop_back();
-          // log_message(INFO_MSG,"column %d's rows, after removing row %d\n",r_cols[i],s); print_vec(crow);
+          // result->info_message("column %d's rows, after removing row %d\n",r_cols[i],s); print_vec(result, crow);
         }
       }
       ++i;
@@ -4608,7 +4576,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
 {
   if (result->log_debug)
   {
-    log_message(DEBUG_MSG,"IIA starting HNF\n");
+    result->debug_message("IIA starting HNF\n");
     //if (result->log_debug)
       print_problem("Trying HNF on this");
   }
@@ -4657,8 +4625,8 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
   {
     B.print_matrix("HNF B initial");
     U.print_matrix("HNF U initial");
-    log_message(INFO_MSG,"HNF column order initial");
-    print_vec(hnf_col_order);
+    result->info_message("HNF column order initial");
+    print_vec(result, hnf_col_order);
   }
   
   // zzyk to do, if needed
@@ -4673,7 +4641,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
   int hnf_c(0);
   for (int hnf_r = 0; hnf_r < (int)this_rows; ++hnf_r)
   {
-    log_message(DEBUG_MSG,"hnf_r %d, hnf_c %d\n",hnf_r, hnf_c);
+    result->debug_message("hnf_r %d, hnf_c %d\n",hnf_r, hnf_c);
     
     // For each column, ensure top-row coefficient is positive, by multiplying columns by -1 as needed
     // IMP for each row, ensure first coefficient is positive, by multiplying rows by -1 as needed
@@ -4735,7 +4703,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
           small_r = br;
         }
       }
-      log_message(DEBUG_MSG,"row %d has smallest coefficient %d for col %d\n",small_r,small_v,hnf_c);
+      result->debug_message("row %d has smallest coefficient %d for col %d\n",small_r,small_v,hnf_c);
       
       // subtract small_r from all other rows
       // copy col_rows since matrix_row_us_minus_vr changes it
@@ -4782,7 +4750,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
     
     if (0)
     {
-      log_message(DEBUG_MSG,"done reducing hnf_r %d hnf_c %d\n",hnf_r,hnf_c);
+      result->debug_message("done reducing hnf_r %d hnf_c %d\n",hnf_r,hnf_c);
       B.print_matrix("HNF B after reducing hnf_r");
       U.print_matrix("HNF U after reducing hnf_r");
     }
@@ -4790,7 +4758,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
     if (small_r==-1)
     {
       // move this col to the end and keep working? are we sure we are done?
-      log_message(DEBUG_MSG,"HNF done early, there was a redundant constraint or too few constraints, no nonzeros in col %d\n",hnf_r);
+      result->debug_message("HNF done early, there was a redundant constraint or too few constraints, no nonzeros in col %d\n",hnf_r);
       continue;
     }
     
@@ -4801,7 +4769,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
 
     if (0)
     {
-      log_message(DEBUG_MSG,"swapped rows %d and %d after reducing hnf_r %d hnf_c %d\n", small_r, hnf_r, hnf_r, hnf_c);
+      result->debug_message("swapped rows %d and %d after reducing hnf_r %d hnf_c %d\n", small_r, hnf_r, hnf_r, hnf_c);
       B.print_matrix("HNF B after reducing hnf_r");
       U.print_matrix("HNF U after reducing hnf_r");
     }
@@ -4810,7 +4778,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
   }
   if (result->log_debug)
   {
-    log_message(DEBUG_MSG,"Done reducing column (row) heights\n");
+    result->debug_message("Done reducing column (row) heights\n");
     B.print_matrix("HNF B reduced");
     U.print_matrix("HNF U reduced");
   }
@@ -4853,7 +4821,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
 
       if (0)
       {
-        log_message(DEBUG_MSG,"Done ensuring smaller off-diagonals for diagonal of row %d and other row %d\n", r, rr);
+        result->debug_message("Done ensuring smaller off-diagonals for diagonal of row %d and other row %d\n", r, rr);
         B.print_matrix("HNF B off-diagonals");
         U.print_matrix("HNF U off-diagonals");
       }
@@ -4862,13 +4830,13 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
 
   if (result->log_debug)
   {
-    log_message(DEBUG_MSG,"Done ensuring smaller off-diagonals\n");
+    result->debug_message("Done ensuring smaller off-diagonals\n");
     B.print_matrix("HNF B off-diagonals");
     U.print_matrix("HNF U off-diagonals");
   }
 
   // transpose B and U at end, since we did row operations
-  MatrixSparseInt BT, UT;
+  MatrixSparseInt BT(result), UT(result);
   B.transpose(BT);
   U.transpose(UT);
   std::swap(BT,B);
@@ -4879,8 +4847,8 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
   {
     B.print_matrix("HNF B untransposed final");
     U.print_matrix("HNF U untransposed final");
-    log_message(INFO_MSG,"HNF column order final");
-    print_vec(hnf_col_order);
+    result->info_message("HNF column order final");
+    print_vec(result, hnf_col_order);
   }
 
   // debug
@@ -4896,12 +4864,12 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
       auto &row = B.rows[r];
       auto d = row.get_val(r);
       if (d==0)
-        log_message(WARNING_MSG,"HNF B row %d diagonal is zero, skipping other sanity checks.\n", d);
+        result->warning_message("HNF B row %d diagonal is zero, skipping other sanity checks.\n", d);
       else
       {
         if (d<0)
         {
-          log_message(ERROR_MSG,"HNF B row %d diagonal is negative, %d<0.\n", r, d);
+          result->error_message("HNF B row %d diagonal is negative, %d<0.\n", r, d);
         }
         for (size_t i = 0; i < row.cols.size(); ++i)
         {
@@ -4909,15 +4877,15 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
           int v = row.vals[i];
           if (c>r)
           {
-            log_message(ERROR_MSG,"HNF B not lower triangular, B[%d,%d] = %d\n",r,c,v);
+            result->error_message("HNF B not lower triangular, B[%d,%d] = %d\n",r,c,v);
           }
           if (v<0)
           {
-            log_message(ERROR_MSG,"HNF B lower triangular entry is negative, B[%d,%d] = %d\n",r,c,v);
+            result->error_message("HNF B lower triangular entry is negative, B[%d,%d] = %d\n",r,c,v);
           }
           if (v>d)
           {
-            log_message(ERROR_MSG,"HNF B off-diagonal entry is not smaller than the diagaonal entry B[%d,%d] = %d !< %d = B[%d,%d]\n",r,c,v,d,r,r);
+            result->error_message("HNF B off-diagonal entry is not smaller than the diagaonal entry B[%d,%d] = %d !< %d = B[%d,%d]\n",r,c,v,d,r,r);
           }
         }
       }
@@ -4952,15 +4920,15 @@ bool IncrementalIntervalAssignment::HNF_satisfy_constraints(MatrixSparseInt &B, 
       e[r]=1;
       // if (rs!=0)
       // {
-        // log_message(WARNING_MSG,"HNF not full rank, row_sum[%d] = %d != 0 but coeff[%d] = 0\n", r, rs, coeff);
-        // log_message(WARNING_MSG,"HNF no solution, overconstrained, because row_sum[%d] = %d != 0 but coeff[%d] = 0\n", r, rs, coeff);
+        // result->warning_message("HNF not full rank, row_sum[%d] = %d != 0 but coeff[%d] = 0\n", r, rs, coeff);
+        // result->warning_message("HNF no solution, overconstrained, because row_sum[%d] = %d != 0 but coeff[%d] = 0\n", r, rs, coeff);
         // return false;
       // }
     }
     else if (rs % coeff)
     {
       if (result->log_warning)
-        log_message(WARNING_MSG,"HNF no integer solution because row_sum[%d] %% coeff[%d] != 0:  %d %% %d = %d\n", r, r, rs, coeff, rs % coeff);
+        result->warning_message("HNF no integer solution because row_sum[%d] %% coeff[%d] != 0:  %d %% %d = %d\n", r, r, rs, coeff, rs % coeff);
       return false;
     }
     else
@@ -4990,7 +4958,7 @@ bool IncrementalIntervalAssignment::HNF_satisfy_constraints(MatrixSparseInt &B, 
   if (!satisfied && result->log_debug)
   {
     print_solution("bad solution does not satisfy constraints");
-    log_message(DEBUG_MSG,"The HNF that resulted in this bad solutions is:\n");
+    result->debug_message("The HNF that resulted in this bad solutions is:\n");
     B.print_matrix("B matrix");
     U.print_matrix("U matrix");
     print_problem("from original problem");
@@ -5006,41 +4974,41 @@ bool IncrementalIntervalAssignment::verify_constraints_satisfied(bool print_me)
   for (int r=0; r<=used_row; ++r)
   {
     auto rs = row_sum(r);
-    if (constraint[r] == CUBIT_EQ)
+    if (constraint[r] == EQ)
     {
       if (rs!=0)
       {
         if (print_me)
         {
-          print_rowIIA(r);
+          print_row_iia(r);
           print_solution_row(r);
-          log_message(ERROR_MSG,"Interval matching equality constraint %d not satisfied, row_sum = %d != 0.\n",r,rs);
+          result->error_message("Interval matching equality constraint %d not satisfied, row_sum = %d != 0.\n",r,rs);
         }
         satisfied=false;
       }
     }
-    else if (constraint[r] == CUBIT_LE)
+    else if (constraint[r] == LE)
     {
       if (rs>0)
       {
         if (print_me)
         {
-          print_rowIIA(r);
+          print_row_iia(r);
           print_solution_row(r);
-          log_message(ERROR_MSG,"Interval matching less-than-or-equal constraint %d not satisfied, row_sum = %d > 0.\n",r,rs);
+          result->error_message("Interval matching less-than-or-equal constraint %d not satisfied, row_sum = %d > 0.\n",r,rs);
         }
         satisfied=false;
       }
     }
-    else if (constraint[r] == CUBIT_GE)
+    else if (constraint[r] == GE)
     {
       if (rs<0)
       {
         if (print_me)
         {
-          print_rowIIA(r);
+          print_row_iia(r);
           print_solution_row(r);
-          log_message(ERROR_MSG,"Interval matching greater-than-or-equal constraint %d not satisfied, row_sum = %d < 0.\n",r,rs);
+          result->error_message("Interval matching greater-than-or-equal constraint %d not satisfied, row_sum = %d < 0.\n",r,rs);
         }
         satisfied=false;
       }
@@ -5053,13 +5021,13 @@ bool MatrixSparseInt::multiply(const std::vector<int> &x, std::vector<int> &y)
 {
   if (col_rows.size()!=x.size())
   {
-    log_message(ERROR_MSG,"Matrix-vector size mismatch. Can't multipy matrix with %lu columns with column vector of different length %lu.\n", (unsigned long) col_rows.size(), (unsigned long) x.size());
+    result->error_message("Matrix-vector size mismatch. Can't multipy matrix with %lu columns with column vector of different length %lu.\n", (unsigned long) col_rows.size(), (unsigned long) x.size());
     return false;
   }
   // y.resize(rows.size());
   if (y.size()<rows.size())
   {
-    log_message(ERROR_MSG,"Matrix-vector size mismatch. Matrix multiplication would produce a vector of length %lu, but result vector is shorter, length %lu.\n", (unsigned long) col_rows.size(), (unsigned long) y.size());
+    result->error_message("Matrix-vector size mismatch. Matrix multiplication would produce a vector of length %lu, but result vector is shorter, length %lu.\n", (unsigned long) col_rows.size(), (unsigned long) y.size());
     return false;
   }
   for (size_t r=0; r < rows.size(); ++r)
@@ -5078,13 +5046,13 @@ bool MatrixSparseInt::multiply(const std::vector<int> &x, std::vector<int> &y)
   return true;
 }
 
-void IncrementalIntervalAssignment::copy_bounds_to_sub( IntervalProblem *sub_problem )
+void IncrementalIntervalAssignment::copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem )
 {
   // set lower/upper bounds in sub-problem.
   // Just copy from parent problem.
   const int sub_edges = sub_problem->num_int_vars();
 
-  for (int c = 0; c < sub_problem->last_copied_col(); c++ )
+  for (int c = 0; c < sub_problem->lastCopiedCol; c++ )
   {
     const auto pc = sub_problem->parent_col(c);
     const auto p_low = col_lower_bounds[ pc ];
@@ -5110,7 +5078,7 @@ void IncrementalIntervalAssignment::copy_bounds_to_sub( IntervalProblem *sub_pro
 }
 
 void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std::vector <int> *pCols,
-                                                   int *row_map, int *col_map, IntervalProblem *target )
+                                                   int *row_map, int *col_map, IncrementalIntervalAssignment *target )
 {
   IncrementalIntervalAssignment *target_program = dynamic_cast<IncrementalIntervalAssignment*>(target);
   assert(target_program);
@@ -5121,7 +5089,6 @@ void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std
   target_program->used_row=pRows->size()-1;
   target_program->used_col=pCols->size()-1;
   
-  pRows->reset();
   for (auto r1 : *pRows)
   {
     auto r=r1-1;
@@ -5144,7 +5111,6 @@ void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std
     target_program->constraint[t]=constraint[r];
   }
 
-  pCols->reset();
   for (auto c1 : *pCols)
   {
     auto c=c1-1;
@@ -5161,7 +5127,6 @@ void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std
 
   if (names_exist())
   {
-    pRows->reset();
     for (auto r1 : *pRows)
     {
       auto r=r1-1;
@@ -5169,7 +5134,6 @@ void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std
       const auto t = row_map[r];      
       target_program->row_names[t]=row_names[r];
     }
-    pCols->reset();
     for (auto c1 : *pCols)
     {
       auto c=c1-1;
@@ -5186,7 +5150,7 @@ void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std
   
 }
 
-int IncrementalIntervalAssignment::next_available_row( CubitConstraintType constraint_type)
+int IncrementalIntervalAssignment::next_available_row( ConstraintType constraint_type)
 {
   ++used_row;
   assert(used_row<number_of_rows);
@@ -5194,29 +5158,10 @@ int IncrementalIntervalAssignment::next_available_row( CubitConstraintType const
   return used_row;
 }
 
-// error if double is not an int
-bool double_to_int(int &i, double d, std::string s)
-{
-  i = std::lround(d);
-  if (fabs(d-(double)i)>0.01)
-  {
-    log_message(ERROR_MSG,"%s",s.c_str());
-    log_message(ERROR_MSG,"IIA is integer based and can not handle non-integer coeffecients and bounds, but was passed %f!=%d. "
-                "Suggest \"set IIA off\" and re-match intervals.",
-                d,i);
-    return false;
-  }
-  return true;
-}
-
-int IncrementalIntervalAssignment::set_row_is_sum_even(int row, MRefEntity *mref_entity, double dummy_coeff_dbl, double dummy_bound_dbl)
+int IncrementalIntervalAssignment::set_row_is_sum_even(int row, MRefEntity *mref_entity, int dummy_coeff, int dummy_bound)
 {
   // comes in as -sum_v + dummy_coeff * D = rhs, or dummy_coeff * D = rhs + sum_v
   // where dummy variable D>=dummy_bound
-  
-  int dummy_coeff, dummy_bound;
-  double_to_int(dummy_coeff,dummy_coeff_dbl,"IIA non-integer sum-even constraint dummy-variable coefficient.");
-  double_to_int(dummy_bound,dummy_bound_dbl,"IIA non-integer sum-even constraint dummy-variable bound.");
   
   int dummy_variable=next_dummy();
   col_lower_bounds[dummy_variable] = dummy_bound;
@@ -5227,9 +5172,9 @@ int IncrementalIntervalAssignment::set_row_is_sum_even(int row, MRefEntity *mref
   
   if (names_exist())
   {
-    CubitString variable_name = CubitString::format("%s_sum_even_var/%d",
-                                                    mref_entity->ref_entity()->class_id().c_str(),
-                                                    dummy_coeff );
+    std::string variable_name = string_format("%s_sum_even_var/%d",
+                                               mref_entity->ref_entity()->class_id().c_str(),
+                                               dummy_coeff );
     set_col_name(dummy_variable, variable_name.c_str());
   }
   
@@ -5259,6 +5204,8 @@ void IncrementalIntervalAssignment::add_more_columns()
   col_lower_bounds.resize(number_of_cols,0);
   col_upper_bounds.resize(number_of_cols,0);
   col_solution.resize(number_of_cols,0);
+  variable_type.resize(number_of_cols,0);
+
   if (names_exist())
   {
     col_names.resize(number_of_cols);
@@ -5290,10 +5237,8 @@ int IncrementalIntervalAssignment::new_row(MRow &Mrow)
   // vals
   row.vals.clear();
   row.vals.reserve(row.cols.size());
-  int v;
-  for (auto v_dbl : Mrow.vals)
+  for (auto v : Mrow.vals)
   {
-    double_to_int(v,v_dbl,"IIA non-integer variable coefficient.");
     row.vals.push_back(v);
   }
   
@@ -5302,14 +5247,13 @@ int IncrementalIntervalAssignment::new_row(MRow &Mrow)
   
   // rhs
   int rhs_int;
-  double_to_int(rhs_int,Mrow.rhs,"IIA non-integer rhs.");
-  rhs[used_row]=rhs_int;
+  rhs[used_row]=Mrow.rhs;
   
   row.sort();
   
   // convert equality to inequality, introducing a slack variable so we start with an initial feasible solution.
   int slack_var=-1;
-  if (Mrow.constraint==CUBIT_EQ)
+  if (Mrow.constraint==EQ)
   {
     // allocate more columns if needed
     if ( usedDummies >= numDummies )
@@ -5351,8 +5295,8 @@ int IncrementalIntervalAssignment::new_row(MRow &Mrow)
   
   if (result->log_debug)
   {
-    log_message(DEBUG_MSG,"IIA new_row (probably a submap U-constraint) ");
-    print_rowIIA(used_row);
+    result->debug_message("IIA new_row (probably a submap U-constraint) ");
+    print_row_iia(used_row);
   }
 
   return used_row;
@@ -5370,7 +5314,7 @@ void IncrementalIntervalAssignment::freeze_problem_size()
   
   // use number_of_xxx not how many are used so far
   rows.resize(number_of_rows);
-  constraint.resize(number_of_rows,CUBIT_EQ);
+  constraint.resize(number_of_rows,EQ);
   rhs.resize(number_of_rows,0);
 
   // col_vars.resize(number_of_cols);
@@ -5378,6 +5322,8 @@ void IncrementalIntervalAssignment::freeze_problem_size()
   col_lower_bounds.resize(number_of_cols,std::numeric_limits<int>::lowest());
   col_upper_bounds.resize(number_of_cols,std::numeric_limits<int>::max());
   col_solution.resize(number_of_cols,0);
+  variable_type.resize(number_of_cols,0);
+
 
   if (names_exist())
   {
@@ -5387,14 +5333,14 @@ void IncrementalIntervalAssignment::freeze_problem_size()
 }
 
 // copy from relaxed solution, not linear program solution
-void IncrementalIntervalAssignment::copy_solution_to_sub  ( int i, IntervalProblem *sub_problem, int sub_i )
+void IncrementalIntervalAssignment::copy_solution_to_sub  ( int i, IncrementalIntervalAssignment *sub_problem, int sub_i )
 {
   IncrementalIntervalAssignment* sub_iia = dynamic_cast<IncrementalIntervalAssignment*>(sub_problem);
   assert(sub_iia);
   sub_iia->col_solution[sub_i]=col_solution[i];
 }
 // copy from linear program solution, not relaxed solution
-void IncrementalIntervalAssignment::copy_solution_from_sub( int i, IntervalProblem *sub_problem, int sub_i )
+void IncrementalIntervalAssignment::copy_solution_from_sub( int i, IncrementalIntervalAssignment *sub_problem, int sub_i )
 {
   IncrementalIntervalAssignment* sub_iia = dynamic_cast<IncrementalIntervalAssignment*>(sub_problem);
   assert(sub_iia);
@@ -5408,15 +5354,32 @@ int IncrementalIntervalAssignment::add_variable( int num_variables )
   number_of_cols+=num_variables;
   return rc;
 }
-//- returns the index = column of the first variable (if num_variables>1, rest are consecutive.)
 
 int IncrementalIntervalAssignment::add_constraint( int num_constraints )
 {
-  auto rc=num_constraints;
+  auto rc=number_of_rows;
   number_of_rows+=num_constraints;
   return rc;
 }
-//- returns the row of the first constraint. (if num_constraints>1, rest are consecutive.)
+void IncrementalIntervalAssignment::reserve_cols( int num_cols )
+{
+  number_of_cols=std::max(number_of_cols,num_cols);
+}
+void IncrementalIntervalAssignment::reserve_rows( int num_rows )
+{
+  number_of_rows=std::max(number_of_rows,num_rows);
+}
+  void IncrementalIntervalAssignment::resize_cols( int num_cols )
+  {
+    reserve_cols(num_cols);
+    freeze_problem_size();
+  }
+  void IncrementalIntervalAssignment::resize_rows( int num_rows )
+  {
+    reserve_rows(num_rows);
+    freeze_problem_size();
+  }
+
 
 // from https://stackoverflow.com/questions/17074324/how-can-i-sort-two-vectors-in-the-same-way-with-criteria-that-uses-only-one-of
 template <typename T, typename Compare>
@@ -5522,14 +5485,18 @@ int IncrementalIntervalAssignment::get_M  ( int row, int col )
 {
   return rows[row].get_val(col);
 }
+void IncrementalIntervalAssignment::get_M( int row, const std::vector<int> *&cols, const std::vector<int> *&vals )
+  {
+    cols = &rows[row].cols;
+    vals = &rows[row].vals;
+  }
+
 void IncrementalIntervalAssignment::set_M( int row, int col, int val )
 {
   // for efficiency
   //   rows columns may get out of order
   //   column rows are not set
   // caller may need to sort rows and fill in cols
-  int v;
-  double_to_int(v, val, "IIA: can't assign floatpoint point coefficient to the constraint matrix.");
   auto &cols = rows[row].cols;
   auto &vals = rows[row].vals;
   // overwrite old value, if any
@@ -5537,7 +5504,7 @@ void IncrementalIntervalAssignment::set_M( int row, int col, int val )
   {
     if (cols[i]==col)
     {
-      if (v==0)
+      if (val==0)
       {
         if (i+1==cols.size())
         {
@@ -5554,18 +5521,25 @@ void IncrementalIntervalAssignment::set_M( int row, int col, int val )
         }
       }
       else
-        vals[i]=v;
+        vals[i]=val;
       return;
     }
   }
-  if (v!=0)
+  if (val!=0)
   {
     // push new non-zero
     cols.push_back(col);
-    vals.push_back(v);
+    vals.push_back(val);
     // rows[row].sort();
   }
 }
+void IncrementalIntervalAssignment::set_M( int row,  std::vector<int> &cols, std::vector<int> &vals )
+  {
+    rows[row].cols.swap(cols);
+    rows[row].vals.swap(vals);
+    // not sorted yet
+  }
+
 
 void IncrementalIntervalAssignment::set_problem_name( const char *name )
 {
@@ -5627,7 +5601,7 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   //     increment by (linear combinations of) vectors from the nullspace
 
   // debug
-  log_message(DEBUG_MSG, "\n---- solving solve_sub %s ----\n",get_problem_name());
+  result->debug_message( "\n---- solving solve_sub %s ----\n",get_problem_name());
   CpuTimer timer;
   double time_rref(0.), time_constrain(0.), time_bound(0.), time_opt(0.), time_tune(0.);
   // debug
@@ -5702,13 +5676,13 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
     if (result->log_debug)
     {
       time_rref = timer.cpu_secs();
-      log_message(INFO_MSG,"rref time %f\n",time_rref);
+      result->info_message("rref time %f\n",time_rref);
     }
     // debug
     
     if (!rref_OK)
     {
-      return CUBIT_FAILURE;
+      return false;
     }
     
     // satisfy constraints using direct back-substitution using the rref, with HNF as backup
@@ -5721,13 +5695,13 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
     if (result->log_debug)
     {
       time_constrain = timer.cpu_secs();
-      log_message(INFO_MSG,"feasible constraints solution time %f\n",time_constrain);
+      result->info_message("feasible constraints solution time %f\n",time_constrain);
     }
     // debug
     
     if (!is_feasible)
     {
-      return CUBIT_FAILURE;
+      return false;
     }
     
     // restore original matrix, before rref
@@ -5751,7 +5725,7 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   // setup nullspace for improving bounds and quality
   // M is nullspace
   // rows 0..MaxMrow span the nullspace, and beyond that are extra rows that were useful candidate increment vectors
-  MatrixSparseInt M;
+  MatrixSparseInt M(result);
   int MaxMrow=0; // last row of nullspace M before we augmented it
 
   {
@@ -5795,7 +5769,7 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   if (result->log_debug)
   {
     time_bound = timer.cpu_secs();
-    log_message(INFO_MSG,"feasible bounds solution time %f\n",time_bound);
+    result->info_message("feasible bounds solution time %f\n",time_bound);
   }
   // debug
   
@@ -5810,14 +5784,14 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   //   variables with non-1 coefficients, such as sum-even variables with a coeff of 2, were chosen as independent vars above.
   //   however, for optimization, we want them to be *depended* variables
   
-  MatrixSparseInt N;
+  MatrixSparseInt N(result);
   improve_solution(M, MaxMrow, N);
   
   // debug
   if (result->log_debug)
   {
     time_opt = timer.cpu_secs();
-    log_message(INFO_MSG,"optimize quality time %f\n",time_opt);
+    result->info_message("optimize quality time %f\n",time_opt);
   }
   // debug
   
@@ -5827,7 +5801,7 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   if (result->log_debug)
   {
     time_tune = timer.cpu_secs();
-    log_message(INFO_MSG,"fine tune quality time %f\n",time_tune);
+    result->info_message("fine tune quality time %f\n",time_tune);
   }
   // debug
 
@@ -5848,23 +5822,23 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   if (result->log_debug)
   {
     double time_assign_tied = timer.cpu_secs();
-    log_message(INFO_MSG,"assign tied variable time %f\n",time_tune);
-    log_message(INFO_MSG,"total solve sub %s time %f\n",get_problem_name(), time_rref + time_constrain + time_bound + time_opt + time_tune + time_assign_tied);
+    result->info_message("assign tied variable time %f\n",time_tune);
+    result->info_message("total solve sub %s time %f\n",get_problem_name(), time_rref + time_constrain + time_bound + time_opt + time_tune + time_assign_tied);
   }
 
-  log_message(DEBUG_MSG, "\n---- done solve_sub %s ----\n\n",get_problem_name());
+  result->debug_message( "\n---- done solve_sub %s ----\n\n",get_problem_name());
 
-  return CUBIT_SUCCESS;
+  return true;
 }
 
 
-int IncrementalIntervalAssignment::solve(int create_groups, 
+bool IncrementalIntervalAssignment::solve(int create_groups,
                                                int report_flag, 
                                                int scheme_flag,
                                                bool first_time)
 {
-  log_message(INFO_MSG,"Running incremental interval assignment.\n"); // comment take this out when IIA is the default
-  log_message(DEBUG_MSG,"Running IIA.\n");
+  result->info_message("Running incremental interval assignment.\n"); // comment take this out when IIA is the default
+  result->debug_message("Running IIA.\n");
   
   if (result->log_debug||result->log_debug)
   {
@@ -5895,20 +5869,21 @@ int IncrementalIntervalAssignment::solve(int create_groups,
     for (int r = 0; r <= used_row; ++r)
     {
       const auto con=constraint[r];
-      if (con!=CUBIT_EQ && con!=CUBIT_EVEN)
+      if (con!=EQ && con!=EVEN)
       {
         // convert constraint
         auto c = next_dummy();
         rows[r].cols.push_back(c);
         // col_rows[c].push_back(r); // done by fill_in_cols_from_rows
-        assert(con==CUBIT_LE || con==CUBIT_GE);
-        const int c_coeff = (con==CUBIT_LE ? 1 : -1);
+        assert(con==LE || con==GE);
+        const int c_coeff = (con==LE ? 1 : -1);
         rows[r].vals.push_back(c_coeff);
         col_lower_bounds[c]=0;
+        variable_type[c]=1;
         
-        // constraint[r] is now CUBIT_EQ;
+        // constraint[r] is now EQ;
         // change it so if we call this again, we don't re-add variables
-        constraint[r]=CUBIT_EQ;
+        constraint[r]=EQ;
         
         if (names_exist())
         {
@@ -5926,13 +5901,13 @@ int IncrementalIntervalAssignment::solve(int create_groups,
     {
       if (num_converted)
       {
-        log_message(DEBUG_MSG,"%d inequalities converted to equalities with dummy variables\n",num_converted);
+        result->debug_message("%d inequalities converted to equalities with dummy variables\n",num_converted);
         if (result->log_debug)
           print_problem("full problem initial after inequality conversion");
       }
       else
       {
-        log_message(DEBUG_MSG,"No inequalities; nothing to convert\n");
+        result->debug_message("No inequalities; nothing to convert\n");
       }
     }
     // debug
@@ -5954,12 +5929,12 @@ int IncrementalIntervalAssignment::solve(int create_groups,
       const auto num_new = used_row-solved_used_row;
       if (num_new)
       {
-        log_message(DEBUG_MSG,"%d new u_submap constraints augmented with with %d dummy slack variables\n",num_new, num_new);
+        result->debug_message("%d new u_submap constraints augmented with with %d dummy slack variables\n",num_new, num_new);
         if (result->log_debug)
           print_problem("full problem initial after u_submap augmentation");
       }
       else
-        log_message(DEBUG_MSG,"no new u_submap constraints\n");
+        result->debug_message("no new u_submap constraints\n");
     }
     // debug
     
@@ -5971,17 +5946,23 @@ int IncrementalIntervalAssignment::solve(int create_groups,
   if (result->log_debug)
   {
     setup_time = total_timer.cpu_secs();
-    log_message(DEBUG_MSG,"IIA setup time = %f\n", setup_time );
+    result->debug_message("IIA setup time = %f\n", setup_time );
+  }
+
+  if (infeasible_constraints())
+  {
+    result->info_message("problem is infeasible\n");
+    return false;
   }
 
   // solve mapping constraints, do these separately first for efficiency
-  log_message(DEBUG_MSG,"Solving IIA mapping subproblems.\n");
-  int success = solve_map(create_groups, report_only, create_infeasible_groups, do_map, do_pave, new_row_min, new_row_max);
+  result->debug_message("Solving IIA mapping subproblems.\n");
+  bool success = solve_map(create_groups, report_only, create_infeasible_groups, do_map, do_pave, new_row_min, new_row_max);
 
   if (result->log_debug)
   {
     map_time = total_timer.cpu_secs();
-    log_message(DEBUG_MSG,"IIA mapping-phase solver time = %f\n", map_time );
+    result->debug_message("IIA mapping-phase solver time = %f\n", map_time );
   }
 
   // if the mapping problems were feasible
@@ -5993,7 +5974,7 @@ int IncrementalIntervalAssignment::solve(int create_groups,
     }
     else
     {
-      log_message(DEBUG_MSG,"Solving IIA sum-even subproblems.\n");
+      result->debug_message("Solving IIA sum-even subproblems.\n");
       // set should_adjust_solution_tied_variables to false
       //   if it was true, then we already did the adjustments we should have when solving the mapping phase
       //   if we adjust again, it may "undo" the mapping solution and cause problems.
@@ -6011,9 +5992,9 @@ int IncrementalIntervalAssignment::solve(int create_groups,
   if (result->log_debug)
   {
     const double even_time = total_timer.cpu_secs();
-    log_message(DEBUG_MSG,"IIA sum-even-phase solver time = %f\n", even_time );
+    result->debug_message("IIA sum-even-phase solver time = %f\n", even_time );
     const double total_time = setup_time+map_time+even_time;
-    log_message(DEBUG_MSG,"Total IIA solve time = %f\n", total_time);
+    result->debug_message("Total IIA solve time = %f\n", total_time);
   }
   if (result->log_debug||result->log_debug)
   {
@@ -6033,18 +6014,17 @@ int IncrementalIntervalAssignment::solve(int create_groups,
   return success;
 }
 
- 
-int IntervalProblem::solve_map(int create_groups,
+bool IncrementalIntervalAssignment::solve_map(int create_groups,
                                      int report_only, int create_infeasible_groups,
                                      int do_map, int do_pave, int row_min, int row_max )
 {
   if (!do_map)
   {
-    log_message(DEBUG_MSG,"\nSkipping interval matching 'map' phase.\n"); //zzyk or should we still check hardset?
-    return CUBIT_SUCCESS;
+    result->debug_message("\nSkipping interval matching 'map' phase.\n"); //zzyk or should we still check hardset?
+    return true;
   }
   if (result->log_debug||result->log_debug)
-    log_message(INFO_MSG,"\nSolving interval matching 'map' phase.\n");
+    result->info_message("\nSolving interval matching 'map' phase.\n");
 
   // common
   if (result->log_debug)
@@ -6053,42 +6033,32 @@ int IntervalProblem::solve_map(int create_groups,
     print_problem("\nEntire Interval Problem");
   }
   
-  // check non-variable equations for feasibility
-  if ( check_hard_sets() && !non_variable_rows_feasible() )
-  {
-    if ( result->log_info )
-      log_message(ERROR_MSG, "Hard-set intervals incompatible with scheme.\n");
-    log_message(DEBUG_MSG, "Non-variable row infeasible.\n");
-    return CUBIT_FAILURE;
-  }
-  
   // subdivide non-sum-even problems into independent components
-  std::vector<IntervalProblem*> sub_problems;
+  std::vector<IncrementalIntervalAssignment*> sub_problems;
   subdivide_problem( sub_problems, false, row_min, row_max  );
-  const int num_subs = sub_problems.size();
+  const auto num_subs = sub_problems.size();
   
   double solve_time=0.;
   CpuTimer solve_timer;
   
   int success = true;
-  for ( int i = num_subs; i--; )
+  for ( size_t i=0; i < num_subs; ++i)
   {
-    auto *sub_problem = sub_problems.get_and_step();
+    auto *sub_problem = sub_problems[i];
     
     if ( create_groups )
     {
-      log_message(DEBUG_MSG,"Mapping subproblem %d of %d:\n",
-                      num_subs - i, num_subs);
-      sub_problem->summarize_problem( false, true );
+      result->debug_message("Mapping subproblem %d of %d:\n", i+1, num_subs);
+      sub_problem->print_problem_summary( "subproblem " + std::to_string(i+1) + " of " + std::to_string(num_subs) );
     }
     if ( !report_only )
     {
-      if (sub_problem->solve_sub( create_infeasible_groups) != CUBIT_SUCCESS)
+      if (sub_problem->solve_sub( create_infeasible_groups) != true)
       {
         success = false;
         if (result->log_info)
         {
-          log_message(WARNING_MSG,"Mapping subproblem %d of %d was infeasible.\n",
+          result->warning_message("Mapping subproblem %d of %d was infeasible.\n",
                         num_subs - i, num_subs );
         }
       }
@@ -6098,7 +6068,7 @@ int IntervalProblem::solve_map(int create_groups,
     {
       const auto solve_sub_time=solve_timer.cpu_secs();
       solve_time+=solve_sub_time;
-      log_message(INFO_MSG,"Subproblem %d of %d size %d X %d time = %f (%f total)\n\n", num_subs-i, num_subs, sub_problem->number_of_rows, sub_problem->number_of_cols, solve_sub_time, solve_time);
+      result->info_message("Subproblem %d of %d size %d X %d time = %f (%f total)\n\n", num_subs-i, num_subs, sub_problem->number_of_rows, sub_problem->number_of_cols, solve_sub_time, solve_time);
       // should really report used_row, used_col, and num_nonzeros,
     }
   }
@@ -6109,49 +6079,51 @@ int IntervalProblem::solve_map(int create_groups,
 //  if (result->log_debug)
 //  {
 //    const auto cleanup_time=solve_timer.cpu_secs();
-//    log_message(INFO_MSG,"gather_solution and cleanup time %f\n",cleanup_time);
+//    result->info_message("gather_solution and cleanup time %f\n",cleanup_time);
 //  }
 
   return success;
 }
 
-int IntervalProblem::solve_even(int create_groups,
+bool IncrementalIntervalAssignment::solve_even(int create_groups,
                                       int report_only, int create_infeasible_groups,
                                       int do_map, int do_pave, int row_min, int row_max )
 {
   if (!do_pave)
   {
-    log_message(DEBUG_MSG,"Skipping interval matching sum-even phase.\n");
-    return CUBIT_SUCCESS;
+    result->debug_message("Skipping interval matching sum-even phase.\n");
+    return true;
   }
 
   if (result->log_debug||result->log_debug)
-    log_message(INFO_MSG,"Solving interval matching sum-even phase.\n");
+    result->info_message("Solving interval matching sum-even phase.\n");
 
   // subdivide based on sum-even constraints.
   // Some equality constraints may not be used
-  std::vector<IntervalProblem*> sub_problems;
+  std::vector<IncrementalIntervalAssignment*> sub_problems;
   subdivide_problem( sub_problems, true, row_min, row_max );
-  const int num_subs = sub_problems.size();
+  const auto num_subs = sub_problems.size();
   
   int success = true;
-  for ( int i = sub_problems.size(); i--; )
+  for ( size_t i = 0; i < num_subs; ++i )
   {
-    auto *sub_problem = sub_problems.get_and_step();
+    auto *sub_problem = sub_problems[i];
     
-    if ( create_groups ) {
-      log_message(DEBUG_MSG,"Sum-even (Paving) subproblem %d of %d:\n",
-                      num_subs - i, num_subs);
-      sub_problem->summarize_problem( false, true );
+    if ( create_groups )
+    {
+      result->debug_message("Sum-even (Paving) subproblem %d of %d:\n", i+1, num_subs);
+      sub_problem->print_problem_summary( "subproblem " + std::to_string(i+1) + " of " + std::to_string(num_subs) );
     }
     if ( !report_only ) {
-      if ( sub_problem->solve_sub_even() == CUBIT_FAILURE )
+      if ( sub_problem->solve_sub_even() == false )
       {
         success = false;
         // create a group for the infeasible subproblem
         if (result->log_info)
-          log_message(WARNING_MSG,"Interval Matching subproblem is infeasible\n");
-        sub_problem->summarize_problem(result->log_info, create_infeasible_groups);
+        {
+          result->warning_message("Interval Matching subproblem is infeasible\n");
+          sub_problem->print_problem_summary();
+        }
       }
     }
   }
@@ -6168,12 +6140,12 @@ IncrementalIntervalAssignment::~IncrementalIntervalAssignment()
 {     
 }
 
-void IncrementalIntervalAssignment::print_rowIIA(size_t r)
+void IncrementalIntervalAssignment::print_row_iia(size_t r)
 {
   if (names_exist())
-    log_message(INFO_MSG,"  %d %s: ", (int) r, row_names[r].c_str());
+    result->info_message("  %d %s: ", (int) r, row_names[r].c_str());
   else
-    log_message(INFO_MSG,"  %d row: ", (int) r);
+    result->info_message("  %d row: ", (int) r);
   auto &row=rows[r];
   auto &cols=row.cols;
   auto &vals=row.vals;
@@ -6181,50 +6153,50 @@ void IncrementalIntervalAssignment::print_rowIIA(size_t r)
   {
     auto v = vals[i];
     auto c = cols[i];
-    log_message(INFO_MSG, "%+dx%d", v, c );
+    result->info_message( "%+dx%d", v, c );
     if (!col_names.empty())
-      log_message(INFO_MSG,"(%s) ", col_names[c].c_str());
+      result->info_message("(%s) ", col_names[c].c_str());
     else
-      log_message(INFO_MSG," ");
+      result->info_message(" ");
   }
   
   switch (constraint[r])
   {
-    case CUBIT_FREE:
-      log_message(INFO_MSG," unconstrained ");
+    case FREE:
+      result->info_message(" unconstrained ");
       break;
-    case CUBIT_LE:
-      log_message(INFO_MSG," <= ");
+    case LE:
+      result->info_message(" <= ");
       break;
-    case CUBIT_GE:
-      log_message(INFO_MSG," >= ");
+    case GE:
+      result->info_message(" >= ");
       break;
-    case CUBIT_EQ:
-      log_message(INFO_MSG," = ");
+    case EQ:
+      result->info_message(" = ");
       break;
-    case CUBIT_EVEN:
-      log_message(INFO_MSG," = Even ");
+    case EVEN:
+      result->info_message(" = Even ");
       break;
     default:
-      log_message(INFO_MSG," ?unknown_relation ");
+      result->info_message(" ?unknown_relation ");
   }
-  log_message(INFO_MSG," %d\n", rhs[r]);
+  result->info_message(" %d\n", rhs[r]);
 }
 
-void IncrementalIntervalAssignment::print_colIIA(size_t c)
+void IncrementalIntervalAssignment::print_col_iia(size_t c)
 {
   // col indices
   if (names_exist())
-    log_message(INFO_MSG,"  x%d %s", (int) c, col_names[c].c_str());
+    result->info_message("  x%d %s", (int) c, col_names[c].c_str());
   else
-    log_message(INFO_MSG,"  x%d col", (int) c);
-  log_message(INFO_MSG," rows:");
-  print_vec(col_rows[c], false);
+    result->info_message("  x%d col", (int) c);
+  result->info_message(" rows:");
+  print_vec(result, col_rows[c], false);
   
   // values
   // expensive
-  log_message(INFO_MSG," vals:");
-  print_vec(column_values(c));
+  result->info_message(" vals:");
+  print_vec(result, column_values(c));
 }
 
 size_t MatrixSparseInt::num_nonzeros() const
@@ -6238,54 +6210,53 @@ size_t MatrixSparseInt::num_nonzeros() const
 void IncrementalIntervalAssignment::print_problem_summary(std::string prefix)
 {
   if (prefix.empty())
-    log_message(INFO_MSG,"\n");
+    result->info_message("\n");
   else
-    log_message(INFO_MSG,"%s ",prefix.c_str());
-  log_message(INFO_MSG,"IIA problem summary %s\n",
+    result->info_message("%s ",prefix.c_str());
+  result->info_message("IIA problem summary %s\n",
              problem_name.c_str());
-  log_message(INFO_MSG,"  %d rows (0..%d used), %d cols (0..%d used), %lu non-zeros",
+  result->info_message("  %d rows (0..%d used), %d cols (0..%d used), %lu non-zeros",
              number_of_rows, used_row,
              number_of_cols, used_col, (unsigned long) num_nonzeros());
-  log_message(INFO_MSG," %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
-  // log_message(INFO_MSG,"stubbed out\n"); return; // zzyk
+  result->info_message(" %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
+  // result->info_message("stubbed out\n"); return; // zzyk
 }
 
 void IncrementalIntervalAssignment::print_problem(std::string prefix)
 {
   if (prefix.empty())
-    log_message(INFO_MSG,"\n");
+    result->info_message("\n");
   else
-    log_message(INFO_MSG,"%s ",prefix.c_str());
-  log_message(INFO_MSG,"IIA problem %s\n",
+    result->info_message("%s ",prefix.c_str());
+  result->info_message("IIA problem %s\n",
              problem_name.c_str());
-  log_message(INFO_MSG,"  number rows = %d (0 to %d used)\n"
+  result->info_message("  number rows = %d (0 to %d used)\n"
              "  number cols = %d (0 to %d used)\n",
              number_of_rows, used_row,
              number_of_cols, used_col);
-  log_message(INFO_MSG,"  %lu non-zeros\n", (unsigned long)num_nonzeros());
-  log_message(INFO_MSG,"  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
-  // log_message(INFO_MSG,"stubbed out\n"); return; // zzyk
+  result->info_message("  %lu non-zeros\n", (unsigned long)num_nonzeros());
+  result->info_message("  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
+  // result->info_message("stubbed out\n"); return; // zzyk
 
   // print my matrix
-  log_message(INFO_MSG,"Rows\n");
+  result->info_message("Rows\n");
   for (size_t r =0; (int) r <= used_row; ++r)
   {
-    print_rowIIA(r);
+    print_row_iia(r);
   }
-  IntervalProblem::print_problem(prefix);
-  log_message(INFO_MSG,"Column non-zeros\n");
+  result->info_message("Column non-zeros\n");
   for (size_t c=0; (int) c <= used_col && c < col_rows.size(); ++c)
   {
-    print_colIIA(c);
+    print_col_iia(c);
   }
-  log_message(INFO_MSG,"Column values\n");
+  result->info_message("Column values\n");
   for (size_t c=0; (int) c <= used_col && c < col_rows.size(); ++c)
   {
     if (names_exist())
-      log_message(INFO_MSG,"  x%d %s", (int) c, col_names[c].c_str());
+      result->info_message("  x%d %s", (int) c, col_names[c].c_str());
     else
-      log_message(INFO_MSG,"  x%d col", (int) c);
-    log_message(INFO_MSG," bounds=[%s,%s], goal=%f, solution=%d",
+      result->info_message("  x%d col", (int) c);
+    result->info_message(" bounds=[%s,%s], goal=%f, solution=%d",
                (std::numeric_limits<int>::lowest() == col_lower_bounds[c] ? "-inf" : std::to_string(col_lower_bounds[c]).c_str()),
                (std::numeric_limits<int>::max()    == col_upper_bounds[c] ? "+inf" : std::to_string(col_upper_bounds[c]).c_str()),
                goals[c],
@@ -6295,29 +6266,29 @@ void IncrementalIntervalAssignment::print_problem(std::string prefix)
       if (tied_variables[c].size()==1)
       {
         const auto c2 = tied_variables[c].front();
-        log_message(INFO_MSG," <tied to x%d = %d>", c2, col_solution[c2]);
+        result->info_message(" <tied to x%d = %d>", c2, col_solution[c2]);
       }
       else if (tied_variables[c].size()>1)
       {
-        log_message(INFO_MSG," [ MasterTie of x");
+        result->info_message(" [ MasterTie of x");
         for (auto c2 : tied_variables[c])
         {
-          log_message(INFO_MSG," %d", c2);
+          result->info_message(" %d", c2);
         }
-        log_message(INFO_MSG," ]");
+        result->info_message(" ]");
       }
     }
-    log_message(INFO_MSG,"\n");
+    result->info_message("\n");
   }
-  log_message(INFO_MSG,"end IA problem\n\n");
+  result->info_message("end IA problem\n\n");
 }
 
 void IncrementalIntervalAssignment::print_problem(std::string prefix, const std::vector<int> &col_order)
 {
   print_problem(prefix);
-  log_message(INFO_MSG,"^^^^Above columns (variables) are permuted into this order: ");
-  print_vec(col_order);
-  log_message(INFO_MSG,"\n");
+  result->info_message("^^^^Above columns (variables) are permuted into this order: ");
+  print_vec(result, col_order);
+  result->info_message("\n");
   
   // future, do something fancy with copying and reordering
   // auto copy = *this;
@@ -6326,15 +6297,15 @@ void IncrementalIntervalAssignment::print_problem(std::string prefix, const std:
 void IncrementalIntervalAssignment::print_solution_summary(std::string prefix)
 {
   if (prefix.empty())
-    log_message(INFO_MSG,"\n");
+    result->info_message("\n");
   else
-    log_message(INFO_MSG,"%s ",prefix.c_str());
-  log_message(INFO_MSG,"IIA solution summary %s\n",
+    result->info_message("%s ",prefix.c_str());
+  result->info_message("IIA solution summary %s\n",
              problem_name.c_str());
-  log_message(INFO_MSG,"  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
+  result->info_message("  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
   bool force_been_solved = true;
   std::swap(force_been_solved,hasBeenSolved);
-  log_message(INFO_MSG,"Solution is %s.\n", (verify_full_solution(true) ? "feasible" : "BAD"));
+  result->info_message("Solution is %s.\n", (verify_full_solution(true) ? "feasible" : "BAD"));
   // might be "BAD" because the tied variables are not assigned values yet...
   std::swap(force_been_solved,hasBeenSolved);
 }
@@ -6342,27 +6313,27 @@ void IncrementalIntervalAssignment::print_solution_summary(std::string prefix)
 void IncrementalIntervalAssignment::print_solution(std::string prefix)
 {
   if (prefix.empty())
-    log_message(INFO_MSG,"\n");
+    result->info_message("\n");
   else
-    log_message(INFO_MSG,"%s ",prefix.c_str());
-  log_message(INFO_MSG,"IIA solution %s\n",
+    result->info_message("%s ",prefix.c_str());
+  result->info_message("IIA solution %s\n",
              problem_name.c_str());
-  log_message(INFO_MSG,"  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
-  // log_message(INFO_MSG,"var values stubbed out\n"); // zzyk
+  result->info_message("  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
+  // result->info_message("var values stubbed out\n"); // zzyk
   for (size_t c=0; (int) c <= used_col && c < col_rows.size(); ++c)
   {
     print_solution_col(c);
   }
   bool force_been_solved = true;
   std::swap(force_been_solved,hasBeenSolved);
-  log_message(INFO_MSG,"Solution is %s.\n", (verify_full_solution(true) ? "feasible" : "BAD"));
+  result->info_message("Solution is %s.\n", (verify_full_solution(true) ? "feasible" : "BAD"));
   std::swap(force_been_solved,hasBeenSolved);
-  log_message(INFO_MSG,"end IA solution\n\n");
+  result->info_message("end IA solution\n\n");
 }
 
 void IncrementalIntervalAssignment::print_solution_row(int r, std::string prefix)
 {
-  if (!prefix.empty()) log_message(INFO_MSG,"%s ",prefix.c_str());
+  if (!prefix.empty()) result->info_message("%s ",prefix.c_str());
   auto &row = rows[r];
   for (size_t i=0; i<row.cols.size();++i)
   {
@@ -6374,39 +6345,39 @@ void IncrementalIntervalAssignment::print_solution_row(int r, std::string prefix
 void IncrementalIntervalAssignment::print_solution_col(int c)
 {
   if (names_exist())
-    log_message(INFO_MSG,"  x%d %s", (int) c, col_names[c].c_str());
+    result->info_message("  x%d %s", (int) c, col_names[c].c_str());
   else
-    log_message(INFO_MSG,"  x%d col", (int) c);
-  log_message(INFO_MSG," = %d", col_solution[c]);
+    result->info_message("  x%d col", (int) c);
+  result->info_message(" = %d", col_solution[c]);
   if (has_tied_variables && tied_variables[c].size()==1)
   {
     const auto c2 = tied_variables[c].front();
-    log_message(INFO_MSG," <tied to x%d = %d>", c2, col_solution[c2]);
+    result->info_message(" <tied to x%d = %d>", c2, col_solution[c2]);
   }
-  log_message(INFO_MSG,"\n");
+  result->info_message("\n");
 }
 
-void RowSparseInt::print_row() const
+void RowSparseInt::print_row(IAResultImplementation *result) const
 {
-  log_message(INFO_MSG, "row: " );
+  result->info_message( "row: " );
   for (size_t i=0;i<cols.size();++i)
   {
     auto v = vals[i];
     auto c = cols[i];
-    log_message(INFO_MSG, "%+dx%d ", v, c );
+    result->info_message( "%+dx%d ", v, c );
   }
-  log_message(INFO_MSG, "\n" );
+  result->info_message( "\n" );
 }
 
 
 void MatrixSparseInt::print_matrix_summary(std::string prefix)
 {
   if (prefix.empty())
-    log_message(INFO_MSG,"\n");
+    result->info_message("\n");
   else
-    log_message(INFO_MSG,"%s ",prefix.c_str());
-  log_message(INFO_MSG,"sparse integer matrix\n");
-  log_message(INFO_MSG," %lu rows, %lu cols, %lu non-zeros\n",
+    result->info_message("%s ",prefix.c_str());
+  result->info_message("sparse integer matrix\n");
+  result->info_message(" %lu rows, %lu cols, %lu non-zeros\n",
              (unsigned long) rows.size(),
              (unsigned long) col_rows.size(),
              (unsigned long) num_nonzeros());
@@ -6415,29 +6386,29 @@ void MatrixSparseInt::print_matrix_summary(std::string prefix)
 void MatrixSparseInt::print_matrix(std::string prefix)
 {
   if (prefix.empty())
-    log_message(INFO_MSG,"\n");
+    result->info_message("\n");
   else
-    log_message(INFO_MSG,"%s ",prefix.c_str());
-  log_message(INFO_MSG,"sparse integer matrix\n");
-  log_message(INFO_MSG,"  number rows = %lu\n"
+    result->info_message("%s ",prefix.c_str());
+  result->info_message("sparse integer matrix\n");
+  result->info_message("  number rows = %lu\n"
              "  number cols = %lu\n",
              (unsigned long) rows.size(),
              (unsigned long) col_rows.size());
-  //log_message(INFO_MSG,"stubbed out\n"); return;
+  //result->info_message("stubbed out\n"); return;
   // zzyk
-  log_message(INFO_MSG,"Rows\n");
+  result->info_message("Rows\n");
   for (size_t r =0; r < rows.size(); ++r)
   {
-    log_message(INFO_MSG,"  %lu ", (unsigned long) r);
-    rows[r].print_row();
+    result->info_message("  %lu ", (unsigned long) r);
+    rows[r].print_row(result);
   }
-  log_message(INFO_MSG,"Column non-zeros\n");
+  result->info_message("Column non-zeros\n");
   for (size_t c=0; c < col_rows.size(); ++c )
   {
-    log_message(INFO_MSG,"  %lu col: ", (unsigned long) c);
-    print_vec(col_rows[c]);
+    result->info_message("  %lu col: ", (unsigned long) c);
+    print_vec(result, col_rows[c]);
   }
-  log_message(INFO_MSG,"end sparse integer matrix\n\n");
+  result->info_message("end sparse integer matrix\n\n");
 }
 
 
@@ -6447,7 +6418,7 @@ void IncrementalIntervalAssignment::print()
 }
 
 
-void IntervalProblem::recursively_add_edge( int int_var_column,
+void IncrementalIntervalAssignment::recursively_add_edge( int int_var_column,
                                            int do_sum_even,
                                            std::vector<int> &sub_rows,
                                            std::vector<int> &sub_cols,
@@ -6455,16 +6426,15 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
                                            std::vector<int> &sub_col_array )
 {
     // add to list - make sure not already in the list
-  assert( !sub_cols.is_in_list( int_var_column+1 ) ); //no side-effects
   assert( !sub_col_array[ int_var_column ] );
-  sub_cols.append( int_var_column+1 );
+  sub_cols.push_back( int_var_column+1 );
   sub_col_array[ int_var_column ] = true;
 
   auto &non_zeros = col_rows[int_var_column];
-  int row, cross_column;
-  for ( int i = non_zeros.size(); i--; ) {
-    row = non_zeros.get_and_step();
-      // if row not already in sub-problem, 
+  int cross_column;
+  for ( auto row : non_zeros )
+  {
+      // if row not already in sub-problem,
     if ( !sub_row_array[ row ] ) 
     {
       auto &row_non_zeros = rows[row].cols;
@@ -6479,14 +6449,14 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
 
           // is the row a sum-even row?
         int has_sum_even_var = false;
-        row_non_zeros.last();
         {
-          for ( int j = row_non_zeros.size(); j--; ) {
-            cross_column = row_non_zeros.get_and_back();
+          for ( int j = ((int) row_non_zeros.size())-1; j>=0; --j )
+          {
+            cross_column = row_non_zeros[j];
             if ( cross_column >= num_int_vars() &&
                  cross_column < num_int_vars() + sumEvenDummies )
             {
-              log_message(DEBUG_MSG,"IntervalProblem::recursively_add_edge: column %d is a sum-even because it's index is in [%d,%d), so skipping row %d.\n", cross_column,num_int_vars(),num_int_vars() + sumEvenDummies, row );
+              result->debug_message("IncrementalIntervalAssignment::recursively_add_edge: column %d is a sum-even because it's index is in [%d,%d), so skipping row %d.\n", cross_column,num_int_vars(),num_int_vars() + sumEvenDummies, row );
               has_sum_even_var = true;
               break;
             }
@@ -6514,9 +6484,9 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
         int min_edge_count=0;
         int expected_edge_count=0;
         int sum_even_min=0;
-        for ( int k = row_non_zeros.size(); k--; )
+        for ( int k = ( (int) row_non_zeros.size()-1); k>=0; --k)
         {
-          cross_column = row_non_zeros.get_and_back();
+          cross_column = row_non_zeros[k];
           int coeff = get_M( row, cross_column );
           int var_bound = col_lower_bounds[ cross_column ];
           if ( cross_column < num_int_vars() )
@@ -6557,13 +6527,13 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
       
       // add row to sub problem
       if ( do_add ) {
-        sub_rows.append( row+1 );
+        sub_rows.push_back( row+1 );
         sub_row_array[ row ] = true;
         
           // recursively add cross-columns
-        for ( int k = row_non_zeros.size(); k--; )
+        for ( int k = ( (int) row_non_zeros.size())-1; k>=0; --k)
         {
-          cross_column = row_non_zeros.get_and_back();
+          cross_column = row_non_zeros[k];
           if ( cross_column != int_var_column &&
                !sub_col_array[ cross_column ] )
           {
@@ -6578,17 +6548,17 @@ void IntervalProblem::recursively_add_edge( int int_var_column,
 }
 
 
-void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_problems,
+void IncrementalIntervalAssignment::subdivide_problem(std::vector<IncrementalIntervalAssignment*> &sub_problems,
                                         int do_sum_even, int row_min, int row_max )
 {
 
   if (result->log_debug||result->log_debug)
-    log_message(INFO_MSG,"---- Subdividing IntervalProblem into independent sub-problems ----\n");
+    result->info_message("---- Subdividing IncrementalIntervalAssignment into independent sub-problems ----\n");
   
   CpuTimer subdivide_timer;
   
     // how to deal with edge pointing to row? Add new TDILPIntegerVariable.hpp
-  int e, r, c;
+  int r, c;
   std::vector <int> sub_rows, sub_cols; // these are indexed from 1, so 0 corresponds to not assigned
   
   // seen_columns[i] = TRUE if column i is in *any* subproblem.
@@ -6624,16 +6594,15 @@ void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_probl
     }
     // add e_low to e_high to list
     for ( e = e_low; e < e_high; e++ )
-      relevant_cols.append(e);
+      relevant_cols.push_back(e);
   }
   
   // if row_min and row_max are specified, then we just care about subproblems involving the variables in those constraints.
   const bool row_subset = (row_min!=-1 && row_max!=-1);
 
   relevant_cols.reset();
-  for ( int j = relevant_cols.size(); j--; ) 
+  for ( auto e : relevant_cols )
   {
-    e = relevant_cols.get_and_step();
     
       // if column not already in a subproblem
     if ( seen_columns[e] == 0 ) {
@@ -6649,8 +6618,9 @@ void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_probl
         // add in the seen columns, zero out the sub_row and sub_col arrays
       for ( c = 0; c < sub_cols.size(); c++ ) {
           // don't test against e_high, as some sum-even constraints hang on.
-        int col = sub_cols.get_and_step()-1; //-1 because it starts at 1 not 0
+        int col = sub_cols[c]-1; //-1 because it starts at 1 not 0
         assert( col < number_of_cols );
+        assert( col >= 0 );
         // assert( col > e_high || seen_columns[ col ] == 0 );
         seen_columns[ col ] = 1;
         sub_col_array[ col ] = 0;
@@ -6661,7 +6631,7 @@ void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_probl
       
       for ( r = 0; r < sub_rows.size(); r++ )
       {
-        int row = sub_rows.get_and_step()-1; //-1 because it starts at 1 not 0
+        int row = sub_rows[r]-1; //-1 because it starts at 1 not 0
         sub_row_array[row] = 0;
       }
 
@@ -6683,7 +6653,7 @@ void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_probl
       }
       
         // make a new problem, of correct type and size including dummies
-      IntervalProblem *sub_problem = new_sub_problem();
+      IncrementalIntervalAssignment *sub_problem = new_sub_problem();
       sub_problem->parentProblem = this;
       sub_problem->parentRows.resize( sub_rows.size() );
       sub_problem->parentCols.resize( sub_cols.size() );
@@ -6693,7 +6663,7 @@ void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_probl
       int this_col, sub_column;
       sub_cols.reset();
       for ( c = 0; c < sub_cols.size(); c++ ) {
-        this_col = sub_cols.get_and_step() -1; //-1 because it starts at 1 not 0
+        this_col = sub_cols[c] -1; //-1 because it starts at 1 not 0
         if ( this_col < num_int_vars() )
         {
           edge = (*associated_int_vars())[this_col];
@@ -6724,7 +6694,7 @@ void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_probl
       sub_rows.reset();
       int this_row;
       for ( r = 0; r < sub_rows.size(); r++ ) {
-        this_row = sub_rows.get_and_step()-1;  //-1 because it starts at 1 not 0
+        this_row = sub_rows[r]-1;  //-1 because it starts at 1 not 0
         assert( this_row < number_of_rows && this_row >= 0 );
         row_map[ this_row ] = r;
         sub_problem->parentRows[r] = this_row;
@@ -6742,9 +6712,8 @@ void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_probl
         // title, for debugging
       if (names_exist())
       {  
-        CubitString title;
-        title = "subproblem ";
-        title += CubitString::number(sub_problems.size());
+        std::string title = "subproblem ";
+        title += to_string(sub_problems.size());
         sub_problem->set_problem_name( title.c_str() );
       }
       
@@ -6759,31 +6728,32 @@ void IntervalProblem::subdivide_problem(std::vector<IntervalProblem*> &sub_probl
         sub_cols.reset();
         for ( int i = 0; i < sub_cols.size(); i++ )
         {
-          assert( sub_cols.get()-1 < number_of_cols );
-          auto jj = sub_cols.get_and_step() -1; //-1 because it starts at 1 not 0
+          auto jj = sub_cols[i] -1; //-1 because it starts at 1 not 0
+          assert( jj < number_of_cols );
+          assert( jj >= 0 );
           copy_solution_to_sub(jj, sub_problem, i);
         }
       }
       if (result->log_debug)
       {
-        log_message(INFO_MSG,"\nSubproblem %d:\n",sub_problems.size());
-        sub_problem->summarize_problem(true,false);
+        result->info_message("\nSubproblem %d:\n",sub_problems.size());
+        sub_problem->print_problem_summary();
       }
-      sub_problems.append( sub_problem );
+      sub_problems.push_back( sub_problem );
     }
   }
   if (result->log_debug)
   {
     const auto subdivide_time = subdivide_timer.cpu_secs();
-    log_message(DEBUG_MSG,"\nDivided into %d subproblems in time = %f\n\n", (int) sub_problems.size(), subdivide_time);
+    result->debug_message("\nDivided into %d subproblems in time = %f\n\n", (int) sub_problems.size(), subdivide_time);
   }
   else if (result->log_debug||result->log_debug)
   {
-    log_message(INFO_MSG,"\nDivided into %d subproblems.\n\n",sub_problems.size());
+    result->info_message("\nDivided into %d subproblems.\n\n",sub_problems.size());
   }
 }
 
-int IntervalProblem::add_dummy_variable(int num_variables,
+int IncrementalIntervalAssignment::add_dummy_variable(int num_variables,
                                         bool is_sum_even)
 {
   numDummies += num_variables;
@@ -6792,9 +6762,9 @@ int IntervalProblem::add_dummy_variable(int num_variables,
   return add_variable( num_variables );
 }
 
-void IntervalProblem::delete_subproblems( std::vector<IntervalProblem*> &sub_problems )
+void IncrementalIntervalAssignment::delete_subproblems( std::vector<IncrementalIntervalAssignment*> &sub_problems )
 {
-  IntervalProblem *sub_problem;
+  IncrementalIntervalAssignment *sub_problem;
   for ( int s = sub_problems.size(); s--; ) {
     sub_problem = sub_problems.pop();
     delete sub_problem;
@@ -6845,17 +6815,17 @@ void IncrementalIntervalAssignment::gather_solution( IncrementalIntervalAssignme
         // check consistency with sub-problem
         assert( edge->ref_entity() == sub_edge->ref_entity() );
         
-        log_message(DEBUG_MSG,"Transfering sub-problem solution ");
+        result->debug_message("Transfering sub-problem solution ");
         if ( edge && sub_edge )
         {
-          log_message(DEBUG_MSG,"%s = %d to parent %s.\n",
+          result->debug_message("%s = %d to parent %s.\n",
                          sub_edge->name().c_str(), 
                          col_solution[col],
                          edge->name().c_str() );
         }
         else
         {
-          log_message(DEBUG_MSG,"weird col %d = %d to parent weird col %d.\n",
+          result->debug_message("weird col %d = %d to parent weird col %d.\n",
                          sub_column, 
                          col_solution[col],
                          this_column );
@@ -6875,13 +6845,13 @@ void IncrementalIntervalAssignment::gather_solutions( std::vector<IncrementalInt
 }
 
 
-bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
+bool IncrementalIntervalAssignment::verify_full_solution(bool print_unsatisfied_constraints)
 {
   if (!get_is_solved())
   {
     if (print_unsatisfied_constraints)
     {
-      log_message(INFO_MSG,"Interval Problem has not even been solved yet, so we can't verify the feasibility of the solution.\n");
+      result->info_message("Interval Problem has not even been solved yet, so we can't verify the feasibility of the solution.\n");
     }
     return false;
   }
@@ -6914,7 +6884,7 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
       {
         if (print_unsatisfied_constraints)
         {
-          log_message(INFO_MSG,"Even variable x%d %s = %d, not even.\n",
+          result->info_message("Even variable x%d %s = %d, not even.\n",
                      edge_index,
                      tdilp->name().c_str(),
                      sol_int);
@@ -6931,7 +6901,7 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
     {
       if (print_unsatisfied_constraints)
       {
-        log_message(INFO_MSG,"Variable x%d %s = %d < %d, below lower bound.\n",
+        result->info_message("Variable x%d %s = %d < %d, below lower bound.\n",
                    edge_index,
                    tdilp->name().c_str(),
                    sol_int,
@@ -6949,7 +6919,7 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
     {
       if (print_unsatisfied_constraints)
       {
-        log_message(INFO_MSG,"Variable x%d %s = %d > %d, above upper bound.\n",
+        result->info_message("Variable x%d %s = %d > %d, above upper bound.\n",
                    edge_index,
                    tdilp->name().c_str(),
                    sol_int,
@@ -6983,12 +6953,12 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
       if (print_unsatisfied_constraints)
       {
         if (is_sum_even)
-          log_message(INFO_MSG,"Sum-even dummy variable x%d = %g, it is not an even integer when multiplied by 2.\n",
+          result->info_message("Sum-even dummy variable x%d = %g, it is not an even integer when multiplied by 2.\n",
                      d,
                      sol_dbl);
         else
         {
-          log_message(INFO_MSG,"Dummy variable x%d = %g, it is not an integer when multiplied.\n",
+          result->info_message("Dummy variable x%d = %g, it is not an integer when multiplied.\n",
                      d,
                      sol_dbl);
         }
@@ -7005,8 +6975,8 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
       if (print_unsatisfied_constraints)
       {
         if (is_sum_even)
-          log_message(INFO_MSG,"Sum-even ");
-        log_message(INFO_MSG,"dummy variable x%d = %g < %g, below lower bound.\n",
+          result->info_message("Sum-even ");
+        result->info_message("dummy variable x%d = %g < %g, below lower bound.\n",
                    d,
                    sol_dbl,
                    lower);
@@ -7025,8 +6995,8 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
       if (print_unsatisfied_constraints)
       {
         if (is_sum_even)
-          log_message(INFO_MSG,"Sum-even ");
-        log_message(INFO_MSG," dummy variable x%d = %g > %g, above upper bound.\n",
+          result->info_message("Sum-even ");
+        result->info_message(" dummy variable x%d = %g > %g, above upper bound.\n",
                    d,
                    sol_dbl,
                    upper);
@@ -7051,15 +7021,15 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
       continue;
     // ignore rows only involving dummy variables
     // This will miss it if curves are all hard in an infeasible way for triangle primitive inequality constraints...
-    int first_col = cols.get();
+    int first_col = cols[0];
     if (first_col>intVars.size())
     {
-      log_message(DEBUG_MSG,"Ignoring constraint %d involving no intVars, only dummy variables.\n",row);
+      result->debug_message("Ignoring constraint %d involving no intVars, only dummy variables.\n",row);
       continue;
     }
     
     const double rhs = get_B_float(row);
-    CubitConstraintType constraint = constraint[row];
+    ConstraintType constraint = constraint[row];
     col_entries.clear();
     for (int i = 0; i<cols.size(); ++i)
     {
@@ -7083,19 +7053,19 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
     bool is_satisfied(false);
     switch (constraint)
     {
-      case CUBIT_EQ:
+      case EQ:
         if (fabs(lhs-rhs)<constraint_tolerance)
         {
           is_satisfied=true;
         }
         break;
-      case CUBIT_LE:
+      case LE:
         if (lhs<rhs+constraint_tolerance)
         {
           is_satisfied=true;
         }
         break;
-      case CUBIT_GE:
+      case GE:
         if (lhs>rhs-constraint_tolerance)
         {
           is_satisfied=true;
@@ -7107,22 +7077,22 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
     {
       if (print_unsatisfied_constraints)
       {
-        log_message(INFO_MSG,"Constraint %d is not satisfied.  It involves ",row);
+        result->info_message("Constraint %d is not satisfied.  It involves ",row);
         auto *row_entity = get_row_entity(row);
         MRefEntity *entity = row_entity->refEntity;
         if ( entity ) {
-          log_message(INFO_MSG," %s", entity->entity_name().c_str() );
+          result->info_message(" %s", entity->entity_name().c_str() );
         }
         auto *hard_edges = row_entity->hardEdges;
         if ( hard_edges )
         {
           PRINT_INFO ( " (hardset" );
           hard_edges->reset();
-          for ( int h = hard_edges->size(); h--; )
+          for ( int h = 0; h < hard_edges->size(); ++h )
           {
-            log_message(INFO_MSG, " %s", hard_edges->get_and_step()->entity_name().c_str() );
-            if ( h > 0 )
-              log_message(INFO_MSG,",");
+            result->info_message( " %s", hard_edges[h]->entity_name().c_str() );
+            if ( h + 1 < hard_edges->size() )
+              result->info_message(",");
           }
           PRINT_INFO ( ")" );
         }
@@ -7133,36 +7103,36 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
           if ( entity || row_entity->hardEdges )
             PRINT_INFO ( "," );
         }
-        log_message(INFO_MSG,"\n");
+        result->info_message("\n");
         for (int i=0; i<cols.size(); ++i)
         {
           int c = cols[i];
-          CubitString var_name = (c<intVars.size() ? intVars[c]->name() : CubitString("Var")+CubitString::number(c));
-          log_message(INFO_MSG,"%g%s(%g) %c ",
+          string var_name = (c<intVars.size() ? intVars[c]->name() : "Var"+to_string(c));
+          result->info_message("%g%s(%g) %c ",
                      col_entries[i],
                      var_name.c_str(),
                      get_solution_float(cols[i]),
                      (i+1<cols.size() ? '+' : ' ') );
         }
-        log_message(INFO_MSG,"(sum=%g)",lhs);
+        result->info_message("(sum=%g)",lhs);
         switch (constraint)
         {
-          case CUBIT_EQ:
-            log_message(INFO_MSG," = ");
+          case EQ:
+            result->info_message(" = ");
             break;
-          case CUBIT_LE:
-            log_message(INFO_MSG," <= ");
+          case LE:
+            result->info_message(" <= ");
             break;
-          case CUBIT_GE:
-            log_message(INFO_MSG," >= ");
+          case GE:
+            result->info_message(" >= ");
             break;
-          case CUBIT_EVEN:
-            log_message(INFO_MSG," =Even ");
+          case EVEN:
+            result->info_message(" =Even ");
             break;
           default:
-            log_message(INFO_MSG," ? ");
+            result->info_message(" ? ");
         }
-        log_message(INFO_MSG,"%g\n", rhs);
+        result->info_message("%g\n", rhs);
         ++num_constraints_unsatisfied;
         rc=false;
       }
@@ -7174,84 +7144,30 @@ bool IntervalProblem::verify_full_solution(bool print_unsatisfied_constraints)
   }
   if (print_unsatisfied_constraints)
   {
-    if (num_constraints_unsatisfied) log_message(INFO_MSG,"%d constraints unsatisfied.\n",num_constraints_unsatisfied);
-    if (num_non_integer) log_message(INFO_MSG,"%d variables non-integer.\n",num_non_integer);
-    if (num_non_even) log_message(INFO_MSG,"%d variables non-even.\n",num_non_even);
-    if (num_out_of_bounds) log_message(INFO_MSG,"%d variables out-of-bounds.\n",num_out_of_bounds);
-    if (worst_out_of_bound) log_message(INFO_MSG,"%d is how far the worst variable is from its bounds.\n",worst_out_of_bound);
+    if (num_constraints_unsatisfied) result->info_message("%d constraints unsatisfied.\n",num_constraints_unsatisfied);
+    if (num_non_integer) result->info_message("%d variables non-integer.\n",num_non_integer);
+    if (num_non_even) result->info_message("%d variables non-even.\n",num_non_even);
+    if (num_out_of_bounds) result->info_message("%d variables out-of-bounds.\n",num_out_of_bounds);
+    if (worst_out_of_bound) result->info_message("%d is how far the worst variable is from its bounds.\n",worst_out_of_bound);
   }
   return rc;
 }
 
-  
-  
-  void IncrementalIntervalAssignment::log_message(MessageType message_type, const char* format, ...)
+  void MatrixSparseInt::print_map(const BlockingCols &amap)
   {
-    if (!result)
-      return;
-    
-    // check message type and generate prefix
-    std::string prefix;
-    switch (message_type)
+    for (auto m : amap)
     {
-      case ERROR_MSG:
-        if (!result->log_error)
-          return;
-        prefix = "ERROR: ";
-        break;
-      case WARNING_MSG:
-        if (!result->log_warning)
-          return;
-        prefix = "WARNING: ";
-        break;
-      case INFO_MSG:
-        if (!result->log_info)
-          return;
-        // no prefix
-        break;
-      case DEBUG_MSG:
-      default:
-        if (!result->log_debug)
-          return;
-        prefix = "DIAGNOSTIC: ";
-    }
-    
-    
-    // convert format, args to a string
-    std::vector<char> message;
-    {
-      va_list args, args2;
-      va_start(args, format);
-      
-      // how much room do we need for our string?
-      // copy because first vsnprintf modifies args
-      va_copy(args2, args);
-      int num = vsnprintf(NULL, 0, format, args2);
-      va_end(args2);
-      
-      if(num >= 0)
-      {
-        // +1 for null terminator
-        message.resize(prefix.size()+num+1);
-        
-        message.assign( prefix.c_str(), prefix.c_str() + prefix.size());
-        
-        // print string
-        vsnprintf(&message.data()[message.size()], num+1, format, args);
-      }
+      const auto c = m.first;
+      const auto lo =  m.second.first;
+      const auto hi = m.second.second;
+      if (lo==block_min)
+        result->info_message(" %d(-inf,%d)", c, hi);
+      else if (hi==block_max)
+        result->info_message(" %d(%d,inf)", c, lo);
       else
-        return; // nothing to print
-      
-      va_end(args);
-      
+        result->info_message(" %d(%d,%d)", c, lo, hi);
     }
-    
-    // add message to end of log
-    {
-      result->message_log.emplace_back( std::string(message.begin(),message.end()) );
-    }
-    
+    result->info_message("\n");
   }
-  
-  
+
 } // namespace
