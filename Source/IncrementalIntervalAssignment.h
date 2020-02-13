@@ -164,10 +164,11 @@ protected: // data
   std::vector<double> goals;
   // bounds are in [ std::numeric_limits<int>::lowest(), std::numeric_limits<int>::max() ]
   // goals are in (0,std::numeric_limits<int>::max())
-  std::vector<short> variable_type;
-  // 0 is user-variable with a goal
-  // 1 is a dummy variable, say a slack variable, or a user-varaible with no goal
-  // 2 is a dummy variable with |coeff| != 1
+
+  // INT_VAR = interval variables, representing some number of intervals
+  //   other vars are sum-even or slack dummy variables
+  enum VarType {INT_VAR, EVEN_VAR, DUMMY_VAR, UNKNOWN_VAR};
+  std::vector<VarType> col_type;
 
   // names for debugging only. Usually these aren't assigned so incur minimal overhead
   bool names_exist();
@@ -232,7 +233,6 @@ protected:
   
   int next_dummy();
   //- return next unused dummy variable. Use after freeze_size.
-  //- Make sure all of the sum-even dummies are obtained first.
 
 public:
   int parent_col(int c) {return parentCols[c];}
@@ -280,27 +280,21 @@ private:
 // original IIA
 protected: // methods
   
-  // layout of variable blocks:
-  //   intVars, sumEvenDummies, convert inequality to equality dummies
-  size_t intVar_start()         {return 0;}
-  size_t intVar_end()           {return (size_t) intVars.size();}
-  size_t allDummies_start()     {return (size_t) intVars.size();}
-  size_t allDummies_end()       {return (size_t) intVars.size()+usedDummies;} // or numDummies
-  // this
-  // size_t nonevenDummies_start() {return (size_t) intVars.size()+sumEvenDummies;}
-  // size_t nonevenDummies_end()   {return (size_t) intVars.size()+sumEvenDummies+usedDummies;} // or numDummies
-  size_t sumEvenDummies_start() {return (size_t) intVars.size();}
-  size_t sumEvenDummies_end()   {return (size_t) intVars.size()+sumEvenDummies;}
-  //
-  // not this
-  // size_t nonevenDummies_start() {return (size_t) intVars.size();}
-  // size_t nonevenDummies_end()   {return (size_t) intVars.size()+numDummies-sumEvenDummies;}
-  // size_t sumEvenDummies_start() {return (size_t) intVars.size()+numDummies-sumEvenDummies;}
-  // size_t sumEvenDummies_end()   {return (size_t) intVars.size()+numDummies;}
-  
-  // return the values of the non-zeros in column c
+//  // layout of variable blocks:
+//  //   intVars, sumEvenDummies, convert inequality to equality dummies
+//  size_t intVar_start()         {return 0;}
+//  size_t intVar_end()           {return (size_t) intVars.size();}
+//  size_t allDummies_start()     {return (size_t) intVars.size();}
+//  size_t allDummies_end()       {return (size_t) intVars.size()+usedDummies;} // or numDummies
+//  // this
+//  // size_t nonevenDummies_start() {return (size_t) intVars.size()+sumEvenDummies;}
+//  // size_t nonevenDummies_end()   {return (size_t) intVars.size()+sumEvenDummies+usedDummies;} // or numDummies
+//  size_t sumEvenDummies_start() {return (size_t) intVars.size();}
+//  size_t sumEvenDummies_end()   {return (size_t) intVars.size()+sumEvenDummies;}
+
+  // return the non-zeros values of the matrix in column c
   //   we don't store these, so lookup takes a little bit of time
-  std::vector<int> column_values(int c);
+  std::vector<int> column_coeffs(int c);
   
   // build the columns from the row data.
   // Call once after the problem is fixed and rows are sorted
@@ -825,6 +819,18 @@ void IncrementalIntervalAssignment::set_B( int row, int val )
 {
   rhs[row] = val;
 }
+
+inline
+  double IncrementalIntervalAssignment::get_goal(int c)
+  {
+    return goals[c];
+  }
+  
+  inline
+  void IncrementalIntervalAssignment::set_no_goal(int c)
+  {
+    goals[c]=0.; // flag that the goal should be ignored
+  }
 
 } // namespace
 

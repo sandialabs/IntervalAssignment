@@ -23,6 +23,7 @@
 //   get rid of names?! or convert
 //   figure out when to sort rows, perhaps a flag as to whether they've been sorted or not
 //   figure out when to reset the solved flag,
+//   remove the extra +1 in the col and row indices when recursively_add_add
 //   use a tool to determine code that isn't used and delete it
 //   fill in public interface methods
 //   get rid of compiler warnings, sign comparision and losing precision, etc.
@@ -206,64 +207,67 @@ void IncrementalIntervalAssignment::assign_vars_goals(bool overwrite)
   }
 }
 
-bool IncrementalIntervalAssignment::assign_dummies_feasible()
-{
-  // solution_init has already been called
-  // already assigned intVars to lround(goals), or to some other value from a prior mapping subproblem
-  // get dummies close to what makes sense for the goals
-  // i.e. initilize sum-even variables to row-sum / 2
-
-  bool feasible=true;
-  for (size_t c = allDummies_start(); c < allDummies_end(); ++c)
+  bool IncrementalIntervalAssignment::assign_dummies_feasible()
   {
-    auto &dummy_rows = col_rows[c];
-    if (dummy_rows.empty())
-      continue;
-    // expect rows.size() == 1
-    if (dummy_rows.size()>=1)
+    // solution_init has already been called
+    // already assigned intVars to lround(goals), or to some other value from a prior mapping subproblem
+    // get dummies close to what makes sense for the goals
+    // i.e. initilize sum-even variables to row-sum / 2
+    
+    bool feasible=true;
+    for (int c = 0; c <= used_col; ++c)
     {
-      col_solution[c]=0;
-      int r = dummy_rows[0];
-      int sum = row_sum(r);
-      int dummy_coeff = get_M(r,c);
-      col_solution[c]= -sum/dummy_coeff;
-      if (dummy_coeff != 1 && sum % dummy_coeff != 0)
+      if (col_type[c]!=INT_VAR)
       {
-        // round col_solution up, as this causes less issues with lower bounds
-        ++col_solution[c];
-        feasible=false;
-      }
-      // we don't support more than one dummy in a row currently
-      // this regularly happens after RREF, but shouldn't happen before RREF
-      if (result->log_debug)
-      {
-        for (auto col : rows[r].cols)
+        
+        auto &dummy_rows = col_rows[c];
+        if (dummy_rows.empty())
+          continue;
+        
+        // assign col_solution[c]
+        int r = dummy_rows[0];
+        int sum = row_sum(r);
+        int dummy_coeff = get_M(r,c);
+        col_solution[c] = -sum/dummy_coeff;
+        if (dummy_coeff != 1 && sum % dummy_coeff != 0)
         {
-          if ((size_t)col!=c && (size_t)col>=allDummies_start())
+          // round col_solution up, as this causes less issues with lower bounds
+          ++col_solution[c];
+          feasible=false;
+        }
+        
+        // we don't support more than one dummy in a row currently
+        // this regularly happens after RREF, but shouldn't happen before RREF
+        if (result->log_debug)
+        {
+          for (auto col : rows[r].cols)
           {
-            result->error_message("IIA: more than one dummy variable in a constraint row is not supported.\n");
+            if ((col!=c && col_type[c]!=INT_VAR))
+            {
+              result->error_message("IIA: more than one dummy variable in a constraint row is not supported.\n");
+              print_row_iia(r);
+            }
+          }
+        }
+        
+        // if there are other rows with the dummy variable, did we satisfy them?
+        if (feasible)
+        {
+          for (size_t i = 1; i < dummy_rows.size(); ++i)
+          {
+            int r = dummy_rows[i];
+            int sum = row_sum(r);
+            if (sum != 0)
+            {
+              feasible=false;
+              break;
+            }
           }
         }
       }
     }
-    // if there are other rows, did we satisfy them?
-    if (feasible)
-    {
-      for (size_t i = 1; i < dummy_rows.size(); ++i)
-      {
-        // zero my solution
-        int r = dummy_rows[i];
-        int sum = row_sum(r);
-        if (sum != 0)
-        {
-          feasible=false;
-          break;
-        }
-      }
-    }
+    return feasible;
   }
-  return feasible;
-}
 
 void IncrementalIntervalAssignment::relevant_rows_cols(const std::vector<int>&seed_cols,
                                                        std::vector<int>&relevant_cols,
@@ -575,12 +579,6 @@ bool IncrementalIntervalAssignment::compute_tied_goals(int c, double &goal_lowes
     return false;
   }
 }
-  
-void IncrementalIntervalAssignment::set_no_goal(int c)
-{
-  goals[c]=0.; // flag that the goal should be ignored
-}
-
 
 double IncrementalIntervalAssignment::set_goal(int c, double goal)
 {   
@@ -601,7 +599,7 @@ double IncrementalIntervalAssignment::set_goal(int c, double goal)
   
   return goal;
 }
-
+  
 bool IncrementalIntervalAssignment::SetValuesFn::update_values(IncrementalIntervalAssignment &iia, QElement &qe)
 {
   // no solution previously?
@@ -867,7 +865,7 @@ bool IncrementalIntervalAssignment::QWithReplacement::tip_top( IncrementalInterv
 
 void IncrementalIntervalAssignment::QWithReplacement::update(const std::vector<int> &cols)
 {
-  if (0 && iia->result->log_debug)
+  if (/* DISABLES CODE */ (0) && iia->result->log_debug)
   {
     iia->result->info_message("Q before update ");
     print();
@@ -904,7 +902,7 @@ void IncrementalIntervalAssignment::QWithReplacement::update(const std::vector<i
     }
   }
   
-  if (0 && iia->result->log_debug)
+  if (/* DISABLES CODE */ (0) && iia->result->log_debug)
   {
     iia->result->info_message("Q after update ");
     print();
@@ -948,12 +946,8 @@ bool IncrementalIntervalAssignment::tip_top( std::priority_queue<QElement> &Q, S
   }
   
   t = Q.top(); // copy
-  Q.pop(); // unline MSIntervalUtilIncremental, we pop the queue before exiting. We've copied the top already.
+  Q.pop();
 
-  // if (result->log_debug && t.c==1530) //zzyk debug
-  // {
-  //  result->debug_message("\nIIA tip_top: x%d priority %g, sol %d, goal %g\n", t.c, t.valueA, t.solution, goals[t.c]);
-  // }
   // Check that the element value is up to date.
   // If not, then put it back on the queue and get the new top
   while ( val_fn.update_values(*this,t) )
@@ -961,16 +955,14 @@ bool IncrementalIntervalAssignment::tip_top( std::priority_queue<QElement> &Q, S
     result->debug_message("Q stale.\n");
     if (t.valueA>threshold)
     {
-      if (1 || t<Q.top())  //zzyk 1 || t<Q.top
-      {
-        result->debug_message("Q reque.\n");
-        Q.push(t);
-      }
-      else
-      {
-        // t is not smaller than the current top, so return it as if it were the top
-        break;
-      }
+      //      // alternatively
+      //      //   if t is not smaller than the current top, so return it as if it were the top
+      //      if (! (t<Q.top()) )
+      //      {
+      //        break;
+      //      }
+      result->debug_message("Q reque.\n");
+      Q.push(t);
     }
     else
     {
@@ -993,10 +985,6 @@ bool IncrementalIntervalAssignment::tip_top( std::priority_queue<QElement> &Q, S
     result->debug_message("Q being emptied.\n");
     Q = std::priority_queue<QElement>();
   }
-  // if (result->log_debug && t.c==1530) //zzyk
-  // {
-  //  result->debug_message("\nIIA tip_top end: x%d priority %g, sol %d, goal %g\n", t.c, t.valueA, t.solution, goals[t.c];
-  // }
   result->debug_message("Q tip top %d values %g %g, remaining Q size %d\n", t.c, t.valueA, t.valueB, (int) Q.size());
 
   return false;
@@ -1957,7 +1945,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
   QWithReplacement Q(this,priority_fn,priority_threshold);
   // get all the columns, except the tied_variables
   std::vector<int>untied_int_vars;
-  untied_int_vars.reserve(num_int_vars());
+  untied_int_vars.reserve(used_col+1);
   for (int c = 0; (size_t) c < tied_variables.size(); ++c)
   {
     if (tied_variables[c].size()!=1)
@@ -1989,7 +1977,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
       ++iter;
       timer->cpu_secs(); // iter start
       result->debug_message("iter %d ",iter);
-      if (0 && iter>max_iter)
+      if (/* DISABLES CODE */ (0) && iter>max_iter)
       {
         result->error_message("IIA: max_iter %d reached when trying to improve solution towards goals.\n",max_iter);
         break;
@@ -2204,7 +2192,7 @@ void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxM
             rc = false;
           
             // debug
-            if (0)
+            if (/* DISABLES CODE */ (0))
             {
               result->info_message("var x%d stuck at %d, not fixed ", t.c, t.solution);
               if (give_up)
@@ -2747,7 +2735,7 @@ bool IncrementalIntervalAssignment::create_nullspace(const std::vector<int>&cols
     {
       row.cols[j]=cols_dep[ col_rows[c][j] ];
     }
-    row.vals=column_values(c);
+    row.vals=column_coeffs(c);
     // result->info_message("intial "); row.print_row(result);
     
     // multiply by -1 * L / leading value of row
@@ -3496,7 +3484,7 @@ void MatrixSparseInt::pop_row()
   }
 }
 
-std::vector<int> IncrementalIntervalAssignment::column_values(int c)
+std::vector<int> IncrementalIntervalAssignment::column_coeffs(int c)
 {
   std::vector<int> vals;
   auto &col = col_rows[c];
@@ -3556,13 +3544,14 @@ void IncrementalIntervalAssignment::SetValuesNumCoeff::set_values_implementation
     qe.valueB = -smallest_coeff;
   }
   // valueC
-  if (c<(int)iia.intVar_end()) // edge
+  auto ctype = iia.col_type[c];
+  if (ctype==INT_VAR)
   {
     double glo, ghi;
     iia.compute_tied_goals(c,glo,ghi);
     qe.valueC=glo; // prefer longer ones
   }
-  else if (c<(int)iia.sumEvenDummies_end())  // sum-even
+  else if (ctype==EVEN_VAR)  // sum-even
   {
     if (fabs(qe.valueB)!=1)
     {
@@ -4667,7 +4656,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
       }
       assert(B.rows[br].get_val(hnf_c) >= 0);
     }
-    if (0)
+    if (/* DISABLES CODE */ (0))
     {
       B.print_matrix("HNF B after column hnf_r lower diagonal entries made positive");
       U.print_matrix("HNF U after column hnf_r lower diagonal entries made positive");
@@ -4748,7 +4737,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
       
     } while (extra_nonzeros);
     
-    if (0)
+    if (/* DISABLES CODE */ (0))
     {
       result->debug_message("done reducing hnf_r %d hnf_c %d\n",hnf_r,hnf_c);
       B.print_matrix("HNF B after reducing hnf_r");
@@ -4767,7 +4756,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
     U.matrix_row_swap(small_r,hnf_r);
     std::swap(hnf_col_order[small_r], hnf_col_order[hnf_r]);
 
-    if (0)
+    if (/* DISABLES CODE */ (0))
     {
       result->debug_message("swapped rows %d and %d after reducing hnf_r %d hnf_c %d\n", small_r, hnf_r, hnf_r, hnf_c);
       B.print_matrix("HNF B after reducing hnf_r");
@@ -4819,7 +4808,7 @@ bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, 
       B.matrix_row_us_minus_vr(r, rr, 1, m);
       U.matrix_row_us_minus_vr(r, rr, 1, m);
 
-      if (0)
+      if (/* DISABLES CODE */ (0))
       {
         result->debug_message("Done ensuring smaller off-diagonals for diagonal of row %d and other row %d\n", r, rr);
         B.print_matrix("HNF B off-diagonals");
@@ -5048,10 +5037,7 @@ bool MatrixSparseInt::multiply(const std::vector<int> &x, std::vector<int> &y)
 
 void IncrementalIntervalAssignment::copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem )
 {
-  // set lower/upper bounds in sub-problem.
-  // Just copy from parent problem.
-  const int sub_edges = sub_problem->num_int_vars();
-
+  // set lower/upper bounds in sub-problem.  Just copy from parent problem.
   for (int c = 0; c < sub_problem->lastCopiedCol; c++ )
   {
     const auto pc = sub_problem->parent_col(c);
@@ -5059,21 +5045,6 @@ void IncrementalIntervalAssignment::copy_bounds_to_sub( IncrementalIntervalAssig
     sub_problem->col_lower_bounds[c] = p_low;
     const auto p_up = col_upper_bounds[ pc ];
     sub_problem->col_upper_bounds[c] = p_up;
-    
-    if (c < sub_edges)
-    {
-      // copy intvar data
-      auto parent_edge = intVars[pc];
-      auto edge = (*sub_problem->associated_int_vars())[c];
-      int lower_bound = get_v_lower_bound( parent_edge );
-      edge->interval_lower_bound(lower_bound);
-      const int upper_bound = get_v_upper_bound( parent_edge );
-      edge->interval_upper_bound( upper_bound );
-    }
-    else
-    {
-      sub_problem->next_dummy();
-    }
   }
 }
 
@@ -5152,155 +5123,168 @@ void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std
 
 int IncrementalIntervalAssignment::next_available_row( ConstraintType constraint_type)
 {
-  ++used_row;
-  assert(used_row<number_of_rows);
+  if (++used_row>=number_of_rows)
+    add_more_rows();
   constraint[used_row]=constraint_type;
   return used_row;
 }
-
-int IncrementalIntervalAssignment::set_row_is_sum_even(int row, MRefEntity *mref_entity, int dummy_coeff, int dummy_bound)
-{
-  // comes in as -sum_v + dummy_coeff * D = rhs, or dummy_coeff * D = rhs + sum_v
-  // where dummy variable D>=dummy_bound
   
-  int dummy_variable=next_dummy();
-  col_lower_bounds[dummy_variable] = dummy_bound;
-
-  auto &mrow=rows[row];
-  mrow.cols.push_back(dummy_variable);
-  mrow.vals.push_back(dummy_coeff);
-  
-  if (names_exist())
+  int IncrementalIntervalAssignment::next_dummy()
   {
-    std::string variable_name = string_format("%s_sum_even_var/%d",
-                                               mref_entity->ref_entity()->class_id().c_str(),
-                                               dummy_coeff );
-    set_col_name(dummy_variable, variable_name.c_str());
-  }
-  
-  return dummy_variable;
-}
-
-void IncrementalIntervalAssignment::add_more_rows()
-{
-  // const auto old_rows = number_of_rows;
-  number_of_rows = (number_of_rows * 3) / 2 + 8;
-  rows.resize(number_of_rows);
-  rhs.resize(number_of_rows);
-  constraint.resize(number_of_rows);
-  if (names_exist())
-  {
-    row_names.resize(number_of_rows);
-  }
-}
-
-void IncrementalIntervalAssignment::add_more_columns()
-{
-  const auto old_cols = number_of_cols;
-  number_of_cols = (number_of_cols * 3) / 2 + 8;
-  const auto col_increase = old_cols - number_of_cols;
-  numDummies+=col_increase; // all the new columns are dummy variables, and belong at the end
-  col_rows.resize(number_of_cols);
-  col_lower_bounds.resize(number_of_cols,0);
-  col_upper_bounds.resize(number_of_cols,0);
-  col_solution.resize(number_of_cols,0);
-  variable_type.resize(number_of_cols,0);
-
-  if (names_exist())
-  {
-    col_names.resize(number_of_cols);
-  }
-  // we only add_more_columns on parent problems, and only allocate tied_variables on sub_problems
-  //  if (!tied_variables.empty() || old_cols==0)
-  //  {
-  //    tied_variables.resize(number_of_cols);
-  //  }
-}
-
-int IncrementalIntervalAssignment::new_row(MRow &Mrow)
-{
-  // dynamically update in a way that we can continue solving where we left off
-
-  ++used_row; // index of the new_row
-
-  // add more rows if needed
-  if (used_row>=(int)rows.size())
-  {
-    add_more_rows();
-  }
-
-  auto &row=rows[used_row];
-
-  // cols
-  row.cols = Mrow.cols.as_vector();
-
-  // vals
-  row.vals.clear();
-  row.vals.reserve(row.cols.size());
-  for (auto v : Mrow.vals)
-  {
-    row.vals.push_back(v);
-  }
-  
-  // constraint
-  constraint[used_row]=Mrow.constraint;
-  
-  // rhs
-  int rhs_int;
-  rhs[used_row]=Mrow.rhs;
-  
-  row.sort();
-  
-  // convert equality to inequality, introducing a slack variable so we start with an initial feasible solution.
-  int slack_var=-1;
-  if (Mrow.constraint==EQ)
-  {
-    // allocate more columns if needed
-    if ( usedDummies >= numDummies )
+    if (++used_col >= number_of_cols)
     {
       add_more_columns();
     }
-    slack_var = next_dummy();
-    used_col = slack_var;
-    row.cols.push_back(slack_var);
-    row.vals.push_back(-1);
-    
-    // slack_var will start out of bounds, then we optimize to put it into bounds
-    col_lower_bounds[slack_var]=0;
-    col_upper_bounds[slack_var]=0;
-    
+    col_type[used_col]=DUMMY_VAR;
+    return used_col;
+  }
+  
+
+
+  void IncrementalIntervalAssignment::add_more_rows()
+  {
+    // const auto old_rows = number_of_rows;
+    number_of_rows = (number_of_rows * 3) / 2 + 8;
+    rows.resize(number_of_rows);
+    rhs.resize(number_of_rows);
+    constraint.resize(number_of_rows);
     if (names_exist())
     {
-      col_names[slack_var]="slack_row_" + std::to_string(used_row);
+      row_names.resize(number_of_rows);
     }
   }
   
-  // update col_rows for *all* variables in this row
-  for (auto c : row.cols )
+  void IncrementalIntervalAssignment::add_more_columns()
   {
-    col_rows[c].push_back(used_row); // always last entry, no need to sort
-  }
-  
-  if (slack_var>-1)
-  {
-    // assign value of slack var
-    int slack = row_sum(used_row);
-    col_solution[slack_var]=slack;
-  }
-  else
-  {
-    // update rref, not necessarily using slack_var
-    assert(0); // not implemented nor tested, because we don't have this case yet
-  }
-  
-  if (result->log_debug)
-  {
-    result->debug_message("IIA new_row (probably a submap U-constraint) ");
-    print_row_iia(used_row);
+    const auto old_cols = number_of_cols;
+    number_of_cols = (number_of_cols * 3) / 2 + 8;
+    const auto col_increase = old_cols - number_of_cols;
+    numDummies+=col_increase; // all the new columns are dummy variables, and belong at the end
+    col_rows.resize(number_of_cols);
+    col_lower_bounds.resize(number_of_cols,0);
+    col_upper_bounds.resize(number_of_cols,0);
+    col_solution.resize(number_of_cols,0);
+    col_type.resize(number_of_cols,UNKNOWN_VAR);
+    
+    if (names_exist())
+    {
+      col_names.resize(number_of_cols);
+    }
+    // we only add_more_columns on parent problems, and only allocate tied_variables on sub_problems
+    //  if (!tied_variables.empty() || old_cols==0)
+    //  {
+    //    tied_variables.resize(number_of_cols);
+    //  }
   }
 
-  return used_row;
-}
+//int IncrementalIntervalAssignment::set_row_is_sum_even(int row, MRefEntity *mref_entity, int dummy_coeff, int dummy_bound)
+//{
+//  // comes in as -sum_v + dummy_coeff * D = rhs, or dummy_coeff * D = rhs + sum_v
+//  // where dummy variable D>=dummy_bound
+//
+//  int dummy_variable=next_dummy();
+//  col_lower_bounds[dummy_variable] = dummy_bound;
+//
+//  auto &mrow=rows[row];
+//  mrow.cols.push_back(dummy_variable);
+//  mrow.vals.push_back(dummy_coeff);
+//
+//  if (names_exist())
+//  {
+//    std::string variable_name = string_format("%s_sum_even_var/%d",
+//                                               mref_entity->ref_entity()->class_id().c_str(),
+//                                               dummy_coeff );
+//    set_col_name(dummy_variable, variable_name.c_str());
+//  }
+//
+//  return dummy_variable;
+//}
+//
+
+//int IncrementalIntervalAssignment::new_row(MRow &Mrow)
+//{
+//  // dynamically update in a way that we can continue solving where we left off
+//
+//  ++used_row; // index of the new_row
+//
+//  // add more rows if needed
+//  if (used_row>=(int)rows.size())
+//  {
+//    add_more_rows();
+//  }
+//
+//  auto &row=rows[used_row];
+//
+//  // cols
+//  row.cols = Mrow.cols.as_vector();
+//
+//  // vals
+//  row.vals.clear();
+//  row.vals.reserve(row.cols.size());
+//  for (auto v : Mrow.vals)
+//  {
+//    row.vals.push_back(v);
+//  }
+//
+//  // constraint
+//  constraint[used_row]=Mrow.constraint;
+//
+//  // rhs
+//  int rhs_int;
+//  rhs[used_row]=Mrow.rhs;
+//
+//  row.sort();
+//
+//  // convert equality to inequality, introducing a slack variable so we start with an initial feasible solution.
+//  int slack_var=-1;
+//  if (Mrow.constraint==EQ)
+//  {
+//    // allocate more columns if needed
+//    if ( usedDummies >= numDummies )
+//    {
+//      add_more_columns();
+//    }
+//    slack_var = next_dummy();
+//    used_col = slack_var;
+//    row.cols.push_back(slack_var);
+//    row.vals.push_back(-1);
+//
+//    // slack_var will start out of bounds, then we optimize to put it into bounds
+//    col_lower_bounds[slack_var]=0;
+//    col_upper_bounds[slack_var]=0;
+//
+//    if (names_exist())
+//    {
+//      col_names[slack_var]="slack_row_" + std::to_string(used_row);
+//    }
+//  }
+//
+//  // update col_rows for *all* variables in this row
+//  for (auto c : row.cols )
+//  {
+//    col_rows[c].push_back(used_row); // always last entry, no need to sort
+//  }
+//
+//  if (slack_var>-1)
+//  {
+//    // assign value of slack var
+//    int slack = row_sum(used_row);
+//    col_solution[slack_var]=slack;
+//  }
+//  else
+//  {
+//    // update rref, not necessarily using slack_var
+//    assert(0); // not implemented nor tested, because we don't have this case yet
+//  }
+//
+//  if (result->log_debug)
+//  {
+//    result->debug_message("IIA new_row (probably a submap U-constraint) ");
+//    print_row_iia(used_row);
+//  }
+//
+//  return used_row;
+//}
 
 void IncrementalIntervalAssignment::freeze_problem_size()
 {
@@ -5322,7 +5306,7 @@ void IncrementalIntervalAssignment::freeze_problem_size()
   col_lower_bounds.resize(number_of_cols,std::numeric_limits<int>::lowest());
   col_upper_bounds.resize(number_of_cols,std::numeric_limits<int>::max());
   col_solution.resize(number_of_cols,0);
-  variable_type.resize(number_of_cols,0);
+  col_type.resize(number_of_cols,UNKNOWN_VAR);
 
 
   if (names_exist())
@@ -5831,11 +5815,10 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   return true;
 }
 
-
-bool IncrementalIntervalAssignment::solve(int create_groups,
-                                               int report_flag, 
-                                               int scheme_flag,
-                                               bool first_time)
+  bool IncrementalIntervalAssignment::solve(int create_groups,
+                                            int report_flag,
+                                            int scheme_flag,
+                                            bool first_time)
 {
   result->info_message("Running incremental interval assignment.\n"); // comment take this out when IIA is the default
   result->debug_message("Running IIA.\n");
@@ -5879,7 +5862,6 @@ bool IncrementalIntervalAssignment::solve(int create_groups,
         const int c_coeff = (con==LE ? 1 : -1);
         rows[r].vals.push_back(c_coeff);
         col_lower_bounds[c]=0;
-        variable_type[c]=1;
         
         // constraint[r] is now EQ;
         // change it so if we call this again, we don't re-add variables
@@ -6122,7 +6104,7 @@ bool IncrementalIntervalAssignment::solve_even(int create_groups,
         if (result->log_info)
         {
           result->warning_message("Interval Matching subproblem is infeasible\n");
-          sub_problem->print_problem_summary();
+          sub_problem->print_problem_summary("");
         }
       }
     }
@@ -6196,7 +6178,7 @@ void IncrementalIntervalAssignment::print_col_iia(size_t c)
   // values
   // expensive
   result->info_message(" vals:");
-  print_vec(result, column_values(c));
+  print_vec(result, column_coeffs(c));
 }
 
 size_t MatrixSparseInt::num_nonzeros() const
@@ -6418,20 +6400,19 @@ void IncrementalIntervalAssignment::print()
 }
 
 
-void IncrementalIntervalAssignment::recursively_add_edge( int int_var_column,
-                                           int do_sum_even,
-                                           std::vector<int> &sub_rows,
-                                           std::vector<int> &sub_cols,
-                                           std::vector<int> &sub_row_array,
-                                           std::vector<int> &sub_col_array )
+void IncrementalIntervalAssignment::recursively_add_edge(int int_var_column,
+                                                         int do_sum_even,
+                                                         std::vector<int> &sub_rows,
+                                                         std::vector<int> &sub_cols,
+                                                         std::vector<int> &sub_row_array,
+                                                         std::vector<int> &sub_col_array )
 {
-    // add to list - make sure not already in the list
+  // add int_var_column to list - make sure not already in the list
   assert( !sub_col_array[ int_var_column ] );
-  sub_cols.push_back( int_var_column+1 );
+  sub_cols.push_back( int_var_column+1 );  // here is my extraneous +1, zzyk, do do, remove this
   sub_col_array[ int_var_column ] = true;
 
   auto &non_zeros = col_rows[int_var_column];
-  int cross_column;
   for ( auto row : non_zeros )
   {
       // if row not already in sub-problem,
@@ -6439,107 +6420,76 @@ void IncrementalIntervalAssignment::recursively_add_edge( int int_var_column,
     {
       auto &row_non_zeros = rows[row].cols;
 
-        // should we add this row?
-      int do_add = false;
-      if ( do_sum_even ) 
+      // should we add this row?
+      bool do_add = true;
+      // skip sum-even rows if sum-even phase
+      if ( !do_sum_even )
       {
-        do_add = true;
-      }
-      else {
-
-          // is the row a sum-even row?
-        int has_sum_even_var = false;
+        // row is sum-even?
+        for ( auto cc : row_non_zeros )
         {
-          for ( int j = ((int) row_non_zeros.size())-1; j>=0; --j )
+          if (col_type[cc]==EVEN_VAR)
           {
-            cross_column = row_non_zeros[j];
-            if ( cross_column >= num_int_vars() &&
-                 cross_column < num_int_vars() + sumEvenDummies )
-            {
-              result->debug_message("IncrementalIntervalAssignment::recursively_add_edge: column %d is a sum-even because it's index is in [%d,%d), so skipping row %d.\n", cross_column,num_int_vars(),num_int_vars() + sumEvenDummies, row );
-              has_sum_even_var = true;
-              break;
-            }
+            result->debug_message("IncrementalIntervalAssignment::recursively_add_edge: column %d is a sum-even so skipping row %d.\n", cc, row );
+            do_add = false;
+            break;
           }
         }
-          // and if is an equality constraint row
-        if ( !has_sum_even_var ) 
-        {
-          do_add = true;
-        }
-      }
-      
-      // in the mapping phase, add a sum-even constraint row if the curves in the loop are likely very few intervals,
-      //   smaller than the minimum number of intervals implied by the sum-even variable lower bound.
-      // Probably a better solution is to just place a lower-bound on the intervals for individual edges, e.g. when one curve is the whole loop.
-      // Checking small loops slows down the mapping phase solution, but can make a difference in improving quality.
-      // In the past, checking for small loops broke the more_pave tests.
-      if (check_small_loops && !do_add)
-      {
-        // zzyk test problem:
-        // 8 Oct 2019 IIA fails on cubit_test/triangle/tetprimitive_combine.jou if the first mapping problem identifies
-        // row three as a small-loop sum-even row and sets "do_add" to true.
-        // Suspect we need to work harder to find a linear combination of nullspace rows when satisfying the bounds on the inequality dummy variables.
         
-        int min_edge_count=0;
-        int expected_edge_count=0;
-        int sum_even_min=0;
-        for ( int k = ( (int) row_non_zeros.size()-1); k>=0; --k)
+        // row is a small loop? add it anyway
+        // in the mapping phase, add a sum-even constraint row if the curves in the loop are likely very few intervals,
+        //   smaller than the minimum number of intervals implied by the sum-even variable lower bound.
+        // Probably a better solution is to just place a lower-bound on the intervals for individual edges, e.g. when one curve is the whole loop.
+        // Checking small loops slows down the mapping phase solution, but can make a difference in improving quality.
+        if (!do_add)
         {
-          cross_column = row_non_zeros[k];
-          int coeff = get_M( row, cross_column );
-          int var_bound = col_lower_bounds[ cross_column ];
-          if ( cross_column < num_int_vars() )
+          int min_edge_count=0;
+          int expected_edge_count=0;
+          int sum_even_min=0;
+          for ( size_t k = 0; k < row_non_zeros.size(); ++k)
           {
-            associated_int_vars()->reset();
-            associated_int_vars()->step( cross_column );
-            TDILPIntegerVariable *edge = associated_int_vars()->get();
-            // can't use get_edge_bound( edge ) if its already
-            // copied into a subproblem. Use interval_count instead.
-            if ( edge->ref_edge() )
+            int cc = row_non_zeros[k];
+            int vv = rows[row].vals[k];
+            int lo = col_lower_bounds[cc];
+            if ( col_type[cc]==INT_VAR )
             {
-              // if the true_count is less than the variable bound, use the variable bound
-              const int expected_count = std::max(var_bound, edge->true_count());
-              expected_edge_count += coeff * expected_count;
-              min_edge_count += coeff * var_bound;
+                // if the true_count is less than the variable bound, use the variable bound
+                const int expected_count = std::max(lo, (int) std::lround(goals[cc]) );
+                expected_edge_count += vv * expected_count;
+                min_edge_count      += vv * lo;
             }
-            // else periodic surface, it won't be part of a small loop
+            else
+            {
+              // cc is the sum-even variable, should probably check that there is only one
+              sum_even_min = vv*lo;
+            }
           }
-          else
+          // add in rhs
+          int hard_count = rhs[ row ];
+          min_edge_count -= hard_count;
+          expected_edge_count -= hard_count;
+          // if it is possible and likely that the sum might be too small, then add the constraint
+          if ( abs(min_edge_count) < abs(sum_even_min) && //strict inequality
+              // Above: We don't need this row for lower bounds if above is false.
+              // Below: can skip the row on the bet that intervals won't decrease by more than a factor of 2.
+              abs(expected_edge_count) <= 2*abs(sum_even_min) )
           {
-            // this is the sum-even variable
-            sum_even_min = coeff*var_bound;
+            do_add = true;
           }
-        }
-        // add in rhs
-        int hard_count = rhs[ row ];
-        min_edge_count -= hard_count;
-        expected_edge_count -= hard_count;
-        // if it is possible and likely that the sum might be too small, then add the constraint
-        if ( abs(min_edge_count) < abs(sum_even_min) && //strict inequality
-            // Above: We don't need this row for lower bounds if above is false.
-            // Below: can skip the row on the bet that intervals won't decrease by more than a factor of 2.
-            abs(expected_edge_count) <= 2*abs(sum_even_min) )
-        {
-          do_add = true;
         }
       }
       
-      // add row to sub problem
+      // actually add row to sub problem
       if ( do_add ) {
         sub_rows.push_back( row+1 );
         sub_row_array[ row ] = true;
         
-          // recursively add cross-columns
-        for ( int k = ( (int) row_non_zeros.size())-1; k>=0; --k)
+        // recursively add cross-columns
+        for ( auto cross_column : row_non_zeros )
         {
-          cross_column = row_non_zeros[k];
-          if ( cross_column != int_var_column &&
-               !sub_col_array[ cross_column ] )
+          if ( cross_column != int_var_column && !sub_col_array[ cross_column ] )
           {
-            recursively_add_edge( cross_column, do_sum_even, 
-                                  sub_rows, sub_cols,
-                                  sub_row_array, sub_col_array );
+            recursively_add_edge( cross_column, do_sum_even, sub_rows, sub_cols, sub_row_array, sub_col_array );
           }
         }
       }
@@ -6547,211 +6497,145 @@ void IncrementalIntervalAssignment::recursively_add_edge( int int_var_column,
   }
 }
 
-
-void IncrementalIntervalAssignment::subdivide_problem(std::vector<IncrementalIntervalAssignment*> &sub_problems,
-                                        int do_sum_even, int row_min, int row_max )
-{
-
-  if (result->log_debug||result->log_debug)
-    result->info_message("---- Subdividing IncrementalIntervalAssignment into independent sub-problems ----\n");
   
-  CpuTimer subdivide_timer;
-  
-    // how to deal with edge pointing to row? Add new TDILPIntegerVariable.hpp
-  int r, c;
-  std::vector <int> sub_rows, sub_cols; // these are indexed from 1, so 0 corresponds to not assigned
-  
-  // seen_columns[i] = TRUE if column i is in *any* subproblem.
-  std::vector<int> seen_columns( number_of_cols, 0 );
-  
-  // map from row (col) of this problem to row (col) of current subproblem
-  std::vector<int> row_map ( number_of_rows, -1 );
-  std::vector<int> column_map ( number_of_cols, -1 );
-
-  // flag if a row or column is in the current subproblem yet.
-  std::vector<int> sub_row_array ( number_of_rows, 0 );
-  std::vector<int> sub_col_array ( number_of_cols, 0 );
-  
-    // for all columns corresponding to sum_even variables (edges)...
-  std::vector <int> relevant_cols;
+  void IncrementalIntervalAssignment::subdivide_problem(std::vector<IncrementalIntervalAssignment*> &sub_problems,
+                                                        bool do_sum_even, int row_min, int row_max )
   {
-    int e_low, e_high;
-    if (do_sum_even)
-    {
-      // e_low = num_int_vars() + (numDummies - sumEvenDummies);
-      e_low = sumEvenDummies_start();
-      e_high = e_low + sumEvenDummies;
-      
-      get_extra_subproblem_variables( relevant_cols );
-    }
-    // ... or for all columns corresponding to edge variables
-    else
-    {
-      e_low = 0;
-      e_high = num_int_vars();
-      // n-sided first & second interval variables.
-      // need to explicitly add in case side is all hard.
-    }
-    // add e_low to e_high to list
-    for ( e = e_low; e < e_high; e++ )
-      relevant_cols.push_back(e);
-  }
-  
-  // if row_min and row_max are specified, then we just care about subproblems involving the variables in those constraints.
-  const bool row_subset = (row_min!=-1 && row_max!=-1);
-
-  relevant_cols.reset();
-  for ( auto e : relevant_cols )
-  {
+    // debug
+    result->debug_message("---- Subdividing into independent sub-problems ----\n");
+    CpuTimer subdivide_timer;
     
+    // seen_columns[i] = TRUE if column i is in *any* subproblem.
+    std::vector<int> seen_columns( number_of_cols, 0 );
+    
+    // map from row (col) of subproblem to row (col) of parent
+    std::vector <int> sub_rows, sub_cols; // these are indexed from 1, so 0 corresponds to not assigned
+    
+    // map from row (col) of this problem to row (col) of subproblem
+    std::vector<int> row_map ( number_of_rows, -1 );
+    std::vector<int> column_map ( number_of_cols, -1 );
+    
+    // flag if a row or column is in the current subproblem yet.
+    std::vector<int> sub_row_array ( number_of_rows, 0 );
+    std::vector<int> sub_col_array ( number_of_cols, 0 );
+    
+    // if row_min and row_max are specified, then we just care about subproblems involving the variables in those rows.
+    const bool row_subset = (row_min!=-1 && row_max!=-1);
+    
+    for (int e = 0; e <= used_col; ++e)
+    {
+      
       // if column not already in a subproblem
-    if ( seen_columns[e] == 0 ) {
-
-        // create a new subproblem
-        // gather rows and columns
-      sub_rows.clean_out();
-      sub_cols.clean_out();
-      recursively_add_edge( e, do_sum_even, sub_rows, sub_cols, sub_row_array, sub_col_array );
-      sub_rows.sort();
-      sub_cols.sort();
-
-        // add in the seen columns, zero out the sub_row and sub_col arrays
-      for ( c = 0; c < sub_cols.size(); c++ ) {
-          // don't test against e_high, as some sum-even constraints hang on.
-        int col = sub_cols[c]-1; //-1 because it starts at 1 not 0
-        assert( col < number_of_cols );
-        assert( col >= 0 );
-        // assert( col > e_high || seen_columns[ col ] == 0 );
-        seen_columns[ col ] = 1;
-        sub_col_array[ col ] = 0;
-      }
-        // edge might be in no equality constraint
-      if (sub_rows.size() == 0)
-        continue;
-      
-      for ( r = 0; r < sub_rows.size(); r++ )
+      if ( seen_columns[e] == 0 && (do_sum_even || col_type[e]==INT_VAR) )
       {
-        int row = sub_rows[r]-1; //-1 because it starts at 1 not 0
-        sub_row_array[row] = 0;
-      }
-
-      // does the subproblem contain any of the new rows? If not, discard and continue
-      if (row_subset)
-      {
-        bool subproblem_matters = false;
-        for (auto r : sub_rows)
-        {
-          const int row = r-1;
-          if (row>=row_min && row<=row_max)
-          {
-            subproblem_matters=true;
-            break;
-          }
-        }
-        if (!subproblem_matters)
-          continue;
-      }
-      
-        // make a new problem, of correct type and size including dummies
-      IncrementalIntervalAssignment *sub_problem = new_sub_problem();
-      sub_problem->parentProblem = this;
-      sub_problem->parentRows.resize( sub_rows.size() );
-      sub_problem->parentCols.resize( sub_cols.size() );
-
-        // associate columns, make map
-      TDILPIntegerVariable *edge, *lp_edge;
-      int this_col, sub_column;
-      sub_cols.reset();
-      for ( c = 0; c < sub_cols.size(); c++ ) {
-        this_col = sub_cols[c] -1; //-1 because it starts at 1 not 0
-        if ( this_col < num_int_vars() )
-        {
-          edge = (*associated_int_vars())[this_col];
-          assert( int_var_column( edge ) == this_col );
         
-          lp_edge = edge->copy_this_for_subproblem(); // copying just for the id==column index...
-          assert( lp_edge != NULL );
-          sub_problem->associate_int_var( lp_edge );
-
-          sub_column = sub_problem->int_var_column( lp_edge );
-        }    
-          // columns seen in order, so all edge columns already associated.
-          // Just add a sum-even variable
-        else
+        // gather data for new subproblem
+        
+        // gather rows and columns
+        sub_rows.clear();
+        sub_cols.clear();
+        recursively_add_edge( e, do_sum_even, sub_rows, sub_cols, sub_row_array, sub_col_array );
+        
+        if (sub_rows.size() == 0)
+          continue;
+        
+        std::sort(sub_rows.begin(),sub_rows.end());
+        std::sort(sub_cols.begin(),sub_cols.end());
+        
+        // add in the seen columns, zero out the sub_row and sub_col arrays
+        for ( auto col : sub_cols )
         {
-          bool is_sum_even = this_col < num_int_vars() + sumEvenDummies;
-          sub_column = sub_problem->add_dummy_variable( 1, is_sum_even );
-            //Inverse map needed for sum-even variables. 
-            // For edges we use the tdlpedge.
+          //-1 because indexing starts at 1 not 0
+          seen_columns [ col-1 ] = 1;
+          sub_col_array[ col-1 ] = 0;
         }
-        assert( this_col < number_of_cols &&
-                this_col >= 0 );
-        column_map[ this_col ] = sub_column;
-        sub_problem->parentCols[sub_column] = this_col;
-      }
-
+        
+        for ( auto row : sub_rows )
+        {
+          sub_row_array[row-1] = 0; //-1 because it starts at 1 not 0
+        }
+        
+        // does the subproblem contain any of the new rows? If not, discard and continue
+        if (row_subset)
+        {
+          bool subproblem_matters = false;
+          for (auto r : sub_rows)
+          {
+            const int row = r-1;
+            if (row>=row_min && row<=row_max)
+            {
+              subproblem_matters=true;
+              break;
+            }
+          }
+          if (!subproblem_matters)
+            continue;
+        }
+        
+        // create new sub problem
+        IncrementalIntervalAssignment *sub_problem = new_sub_problem();
+        sub_problem->parentProblem = this;
+        sub_problem->parentRows.resize( sub_rows.size() );
+        sub_problem->parentCols.resize( sub_cols.size() );
+        
+        sub_problem->add_variable  (sub_cols.size());
+        sub_problem->add_constraint(sub_rows.size());
+        
+        sub_problem->lastCopiedCol = sub_cols.size();
+        
+        sub_problem->freeze_problem_size();
+        
+        // associate columns parent<-->sub problem, make map
+        for ( int c = 0; c < sub_cols.size(); c++ )
+        {
+          auto this_col = sub_cols[c] -1; //-1 because it starts at 1 not 0
+          column_map[ this_col ] = c;
+          sub_problem->parentCols[c] = this_col;
+          
+          sub_problem->col_type[c] = col_type[this_col];
+          copy_solution_to_sub(this_col, sub_problem, c);
+          
+        }
+        
         // set row map
-      sub_rows.reset();
-      int this_row;
-      for ( r = 0; r < sub_rows.size(); r++ ) {
-        this_row = sub_rows[r]-1;  //-1 because it starts at 1 not 0
-        assert( this_row < number_of_rows && this_row >= 0 );
-        row_map[ this_row ] = r;
-        sub_problem->parentRows[r] = this_row;
-      }
-        // rows we'll copy
-      sub_problem->add_constraint( sub_rows.size() );
-      
-        // Get some sizes before freeze_size, since freeze_size
-        // sometimes adds space for delta variables.
-      int sub_edges = sub_problem->num_int_vars();
-      sub_problem->lastCopiedCol = sub_edges + sub_problem->numDummies;
-
-      sub_problem->freeze_problem_size();
-      
-        // title, for debugging
-      if (names_exist())
-      {  
-        std::string title = "subproblem ";
-        title += to_string(sub_problems.size());
-        sub_problem->set_problem_name( title.c_str() );
-      }
-      
-      copy_bounds_to_sub( sub_problem );
-      
-      // copy rows
-      copy_submatrix( &sub_rows, &sub_cols, row_map.data(), column_map.data(), sub_problem );
-      
-      
-      // copy (relaxed) solution, if any, from this to the sub-problem
-      {
-        sub_cols.reset();
-        for ( int i = 0; i < sub_cols.size(); i++ )
+        for ( int r = 0; r < sub_rows.size(); r++ )
         {
-          auto jj = sub_cols[i] -1; //-1 because it starts at 1 not 0
-          assert( jj < number_of_cols );
-          assert( jj >= 0 );
-          copy_solution_to_sub(jj, sub_problem, i);
+          auto this_row = sub_rows[r]-1;  //-1 because it starts at 1 not 0
+          row_map[ this_row ] = r;
+          sub_problem->parentRows[r] = this_row;
         }
+        
+        copy_bounds_to_sub( sub_problem );
+        
+        copy_submatrix( &sub_rows, &sub_cols, row_map.data(), column_map.data(), sub_problem );
+        
+        sub_problems.push_back( sub_problem );
+        
+        // title, for debugging
+        if (names_exist())
+        {
+          std::string title = "subproblem ";
+          title += std::to_string(sub_problems.size());
+          sub_problem->set_problem_name( title.c_str() );
+        }
+        
+        // debug
+        if (result->log_debug)
+        {
+          std::string title = "subproblem ";
+          title += std::to_string(sub_problems.size());
+          sub_problem->print_problem_summary(title);
+        }
+        
       }
-      if (result->log_debug)
-      {
-        result->info_message("\nSubproblem %d:\n",sub_problems.size());
-        sub_problem->print_problem_summary();
-      }
-      sub_problems.push_back( sub_problem );
+    }
+    if (result->log_debug)
+    {
+      const auto subdivide_time = subdivide_timer.cpu_secs();
+      // result->info_message("\nDivided into %d subproblems.\n\n",sub_problems.size());
+      result->debug_message("\nDivided into %d subproblems in time = %f\n\n", (int) sub_problems.size(), subdivide_time);
     }
   }
-  if (result->log_debug)
-  {
-    const auto subdivide_time = subdivide_timer.cpu_secs();
-    result->debug_message("\nDivided into %d subproblems in time = %f\n\n", (int) sub_problems.size(), subdivide_time);
-  }
-  else if (result->log_debug||result->log_debug)
-  {
-    result->info_message("\nDivided into %d subproblems.\n\n",sub_problems.size());
-  }
-}
 
 int IncrementalIntervalAssignment::add_dummy_variable(int num_variables,
                                         bool is_sum_even)
@@ -6764,12 +6648,11 @@ int IncrementalIntervalAssignment::add_dummy_variable(int num_variables,
 
 void IncrementalIntervalAssignment::delete_subproblems( std::vector<IncrementalIntervalAssignment*> &sub_problems )
 {
-  IncrementalIntervalAssignment *sub_problem;
-  for ( int s = sub_problems.size(); s--; ) {
-    sub_problem = sub_problems.pop();
-    delete sub_problem;
+  for ( auto *s : sub_problems )
+  {
+    delete s;
   }
-  sub_problems.clean_out();
+  sub_problems.clear();
 }
 
 
@@ -6779,59 +6662,13 @@ void IncrementalIntervalAssignment::gather_solution( IncrementalIntervalAssignme
   if ( !sub_problem->get_is_solved() )
     return;
 
-  // copy the (true) solution of the sub-problem into the (relaxed) solution of this for each column
-  int e_low = 0;
-  int e_high = sub_problem->lastCopiedCol;
-  for (int e=e_low; e < e_high; e++ )
+  // for each column, copy the solution of the sub-problem into the parent
+  for (int e=0; e < sub_problem->lastCopiedCol; e++ )
   {
     auto &sub_column = e;
     auto this_column = sub_problem->parentCols[ sub_column ];
     assert( this_column >= 0 && this_column < number_of_cols );
     copy_solution_from_sub( this_column, sub_problem, sub_column );
-  }
-  
-  
-  // debug
-  if ( result->log_debug)
-  {
-    for (int e=e_low; e < e_high; e++ )
-    {
-      auto &sub_column = e;
-      auto this_column = sub_problem->parentCols[ sub_column ];
-      
-      if ( e < sub_problem->num_int_vars() )
-      {
-        // check sub-problem integrity
-        sub_problem->associated_int_vars()->reset();
-        sub_problem->associated_int_vars()->step(e);
-        auto sub_edge = sub_problem->associated_int_vars()->get();
-        assert( sub_problem->int_var_column( sub_edge ) == sub_column );
-        
-        // check this problem integrity
-        associated_int_vars()->reset();
-        associated_int_vars()->step(this_column);
-        auto edge = associated_int_vars()->get();
-        assert( int_var_column( edge ) == this_column );
-        // check consistency with sub-problem
-        assert( edge->ref_entity() == sub_edge->ref_entity() );
-        
-        result->debug_message("Transfering sub-problem solution ");
-        if ( edge && sub_edge )
-        {
-          result->debug_message("%s = %d to parent %s.\n",
-                         sub_edge->name().c_str(), 
-                         col_solution[col],
-                         edge->name().c_str() );
-        }
-        else
-        {
-          result->debug_message("weird col %d = %d to parent weird col %d.\n",
-                         sub_column, 
-                         col_solution[col],
-                         this_column );
-        }
-      }
-    }
   }
 }
 
@@ -6860,148 +6697,46 @@ bool IncrementalIntervalAssignment::verify_full_solution(bool print_unsatisfied_
   
   int num_out_of_bounds=0;
   int worst_out_of_bound=0;
-  int num_non_integer=0;
   int num_non_even=0;
 
-  // check meaningful integer variables
-  const double int_tolerance=0.1;
-  for (auto tdilp : intVars)
+  // check integer variables
+  for (int c = 0; c <= used_col; ++c)
   {
-    const int edge_index = int_var_column( tdilp );
-    if (edge_index<0)
-      continue;
+    const int sol = col_solution[c];
     
-    const int sol_int = col_solution[edge_index];
+    const int lower = col_lower_bounds[c];
+    const int upper = col_upper_bounds[c];
     
-    const int lower = col_lower_bounds[];
-    const int upper = col_upper_bounds[];
-        
-    // is even?
-    if (tdilp->is_even())
-    {
-      const int remainder = sol_int % 2;
-      if (remainder)
-      {
-        if (print_unsatisfied_constraints)
-        {
-          result->info_message("Even variable x%d %s = %d, not even.\n",
-                     edge_index,
-                     tdilp->name().c_str(),
-                     sol_int);
-          ++num_non_even;
-          rc=false;
-        }
-        else
-          return false;
-      }
-    }
-    
-    // out of bounds?
-    if (sol_int<lower)
+    // < out of bounds?
+    if (sol<lower)
     {
       if (print_unsatisfied_constraints)
       {
         result->info_message("Variable x%d %s = %d < %d, below lower bound.\n",
-                   edge_index,
-                   tdilp->name().c_str(),
-                   sol_int,
-                   lower);
+                             c,
+                             names_exist() ? col_names[c].c_str() : "",
+                             sol,
+                             lower);
         ++num_out_of_bounds;
-        worst_out_of_bound=std::max(worst_out_of_bound,lower-sol_int);
+        worst_out_of_bound=std::max(worst_out_of_bound,lower-sol);
         rc=false;
       }
       else
         return false;
     }
     
-    // out of bounds?
-    if (sol_int>upper)
+    // > out of bounds?
+    if (sol>upper)
     {
       if (print_unsatisfied_constraints)
       {
         result->info_message("Variable x%d %s = %d > %d, above upper bound.\n",
-                   edge_index,
-                   tdilp->name().c_str(),
-                   sol_int,
-                   upper);
-        worst_out_of_bound=std::max(worst_out_of_bound,sol_int-upper);
+                             c,
+                             names_exist() ? col_names[c].c_str() : "",
+                             sol,
+                             upper);
+        worst_out_of_bound=std::max(worst_out_of_bound,sol-upper);
         ++num_out_of_bounds;
-        rc=false;
-      }
-      else
-        return false;
-    }
-  }
-  
-  // check sum-even (and other) dummies
-  for (int
-       d = num_int_vars();
-       d < num_int_vars() + usedDummies;
-       d ++)
-  {
-    const bool is_sum_even = d < num_int_vars() + sumEvenDummies;
-
-    const double sol_dbl = get_solution_float(d);
-    const int sol_int = get_solution_int(d);
-    
-    const auto lower = col_lower_bounds[d];
-    const auto upper = col_upper_bounds[d];
-    
-    // is even? <==> is integer, since what we store is 1/2 the value
-    if (fabs(sol_int-sol_dbl) > int_tolerance)
-    {
-      if (print_unsatisfied_constraints)
-      {
-        if (is_sum_even)
-          result->info_message("Sum-even dummy variable x%d = %g, it is not an even integer when multiplied by 2.\n",
-                     d,
-                     sol_dbl);
-        else
-        {
-          result->info_message("Dummy variable x%d = %g, it is not an integer when multiplied.\n",
-                     d,
-                     sol_dbl);
-        }
-        ++num_non_integer;
-        rc=false;
-      }
-      else
-        return false;
-    }
-    
-    // out of bounds?
-    if (sol_dbl<lower-int_tolerance)
-    {
-      if (print_unsatisfied_constraints)
-      {
-        if (is_sum_even)
-          result->info_message("Sum-even ");
-        result->info_message("dummy variable x%d = %g < %g, below lower bound.\n",
-                   d,
-                   sol_dbl,
-                   lower);
-        ++num_out_of_bounds;
-        worst_out_of_bound=std::max(worst_out_of_bound,(int)std::lround(lower-sol_dbl));
-        rc=false;
-      }
-      else
-        return false;
-    }
-    
-    // out of bounds?
-    // if upper>=lower, then it is considered unbounded above
-    if (sol_dbl>upper+int_tolerance)
-    {
-      if (print_unsatisfied_constraints)
-      {
-        if (is_sum_even)
-          result->info_message("Sum-even ");
-        result->info_message(" dummy variable x%d = %g > %g, above upper bound.\n",
-                   d,
-                   sol_dbl,
-                   upper);
-        ++num_out_of_bounds;
-        worst_out_of_bound=std::max(worst_out_of_bound,(int)std::lround(sol_dbl-upper));
         rc=false;
       }
       else
@@ -7011,7 +6746,6 @@ bool IncrementalIntervalAssignment::verify_full_solution(bool print_unsatisfied_
   
   // check constraints
   int num_constraints_unsatisfied=0;
-  std::vector<double> col_entries;
   for (int row = 0; row < number_of_rows; ++row)
   {
     auto &cols = rows[row].cols;
@@ -7019,120 +6753,74 @@ bool IncrementalIntervalAssignment::verify_full_solution(bool print_unsatisfied_
     // ignore rows with no variables
     if (cols.empty())
       continue;
-    // ignore rows only involving dummy variables
-    // This will miss it if curves are all hard in an infeasible way for triangle primitive inequality constraints...
-    int first_col = cols[0];
-    if (first_col>intVars.size())
-    {
-      result->debug_message("Ignoring constraint %d involving no intVars, only dummy variables.\n",row);
-      continue;
-    }
     
-    const double rhs = get_B_float(row);
-    ConstraintType constraint = constraint[row];
-    col_entries.clear();
-    for (int i = 0; i<cols.size(); ++i)
-    {
-      col_entries.push_back(get_M(row,cols[i]));
-    }
+    const auto b = rhs[row];
+    ConstraintType ctype = constraint[row];
     
-    // add up lhs, being sure to use lround on integer variables
-    // for constrataints associated with a mapping face, check constraint.
     // if its a sum-even, check that the sum is even, rather than checking the value of the sum-even variable
     
     // add up lhs
-    double lhs(0.);
-    for (int i=0; i<cols.size(); ++i)
+    int lhs(0);
+    for (size_t i = 0; i < cols.size(); ++i)
     {
-      lhs+=get_solution_float(cols[i])*col_entries[i];
-      // to do, for the dependent variables, like the sum-even ones, it is OK to change them to some other value to satisfy it...
+      const auto c = cols[i];
+      const auto v = rows[row].vals[i];
+      lhs+=col_solution[c]*v;
     }
     
     // check
-    const double constraint_tolerance=0.1;
     bool is_satisfied(false);
-    switch (constraint)
+    switch (ctype)
     {
+        // currently all inequalities are converted to EQ so this is the only case
       case EQ:
-        if (fabs(lhs-rhs)<constraint_tolerance)
-        {
+        if (lhs==b)
           is_satisfied=true;
-        }
         break;
       case LE:
-        if (lhs<rhs+constraint_tolerance)
-        {
+        if (lhs<b)
           is_satisfied=true;
-        }
         break;
       case GE:
-        if (lhs>rhs-constraint_tolerance)
-        {
+        if (lhs>b)
           is_satisfied=true;
+        break;
+      case EVEN:
+        if ( (lhs - b) % 2 == 0)
+        {
+          is_satisfied = true;
+          ++num_non_even;
         }
         break;
-      default:;
+      default:
+        ;
     }
     if (!is_satisfied)
     {
       if (print_unsatisfied_constraints)
       {
-        result->info_message("Constraint %d is not satisfied.  It involves ",row);
-        auto *row_entity = get_row_entity(row);
-        MRefEntity *entity = row_entity->refEntity;
-        if ( entity ) {
-          result->info_message(" %s", entity->entity_name().c_str() );
-        }
-        auto *hard_edges = row_entity->hardEdges;
-        if ( hard_edges )
-        {
-          PRINT_INFO ( " (hardset" );
-          hard_edges->reset();
-          for ( int h = 0; h < hard_edges->size(); ++h )
-          {
-            result->info_message( " %s", hard_edges[h]->entity_name().c_str() );
-            if ( h + 1 < hard_edges->size() )
-              result->info_message(",");
-          }
-          PRINT_INFO ( ")" );
-        }
-        if ( row == number_of_rows - 1 )
-          PRINT_INFO ( "\n" );
-        else
-        {
-          if ( entity || row_entity->hardEdges )
-            PRINT_INFO ( "," );
-        }
-        result->info_message("\n");
-        for (int i=0; i<cols.size(); ++i)
-        {
-          int c = cols[i];
-          string var_name = (c<intVars.size() ? intVars[c]->name() : "Var"+to_string(c));
-          result->info_message("%g%s(%g) %c ",
-                     col_entries[i],
-                     var_name.c_str(),
-                     get_solution_float(cols[i]),
-                     (i+1<cols.size() ? '+' : ' ') );
-        }
-        result->info_message("(sum=%g)",lhs);
-        switch (constraint)
+        result->info_message("Constraint row %d %s is not satisfied.  It involves ",
+                             row, names_exist() ? row_names[row].c_str() : "" );
+        print_row_iia(row);
+        result->info_message("(lhs %d)",lhs);
+        switch (ctype)
         {
           case EQ:
-            result->info_message(" = ");
+            result->info_message(" != ");
             break;
           case LE:
-            result->info_message(" <= ");
+            result->info_message(" !<= ");
             break;
           case GE:
-            result->info_message(" >= ");
+            result->info_message(" !>= ");
             break;
           case EVEN:
-            result->info_message(" =Even ");
+            result->info_message(" !Even ");
             break;
           default:
             result->info_message(" ? ");
         }
-        result->info_message("%g\n", rhs);
+        result->info_message("(%d rhs)\n", b);
         ++num_constraints_unsatisfied;
         rc=false;
       }
@@ -7145,8 +6833,7 @@ bool IncrementalIntervalAssignment::verify_full_solution(bool print_unsatisfied_
   if (print_unsatisfied_constraints)
   {
     if (num_constraints_unsatisfied) result->info_message("%d constraints unsatisfied.\n",num_constraints_unsatisfied);
-    if (num_non_integer) result->info_message("%d variables non-integer.\n",num_non_integer);
-    if (num_non_even) result->info_message("%d variables non-even.\n",num_non_even);
+    if (num_non_even) result->info_message("%d rows non-even.\n",num_non_even);
     if (num_out_of_bounds) result->info_message("%d variables out-of-bounds.\n",num_out_of_bounds);
     if (worst_out_of_bound) result->info_message("%d is how far the worst variable is from its bounds.\n",worst_out_of_bound);
   }

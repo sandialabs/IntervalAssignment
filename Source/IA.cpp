@@ -33,7 +33,7 @@ namespace IIA
   {
     // could do this more efficiently...
     delete ia;
-    ia = new IncrementalIntervalAssignment(&result);
+    ia = new IncrementalIntervalAssignment( dynamic_cast<IAResultImplementation*>(result) );
     free_row = 0;
   }
   
