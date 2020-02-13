@@ -52,7 +52,9 @@ public:
 	//== Define Problem
 
 	// A
-	int next_row(); // optional, returns index of next unused row 0..	
+	int next_row(); // optional, returns index of next unused row 0..
+  int next_col(); // optional, returns index of next unused col 0..
+  
 	// swaps vectors with current contents, doesn't make a copy
 	void set_row(int row, std::vector<int> &cols, std::vector<int> &vals);
 	void set_row_col(int row, int col, int val); // A(row,col) = val

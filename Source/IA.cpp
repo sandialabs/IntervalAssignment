@@ -82,7 +82,11 @@ namespace IIA
   }
   int IA::next_row()
   {
-    return ia->next_available_row(EQ);
+    return ia->next_available_row();
+  }
+  int IA::next_col()
+  {
+    return ia->next_dummy();
   }
   void IA::set_row(int row, std::vector<int> &cols, std::vector<int> &vals)
   {
@@ -184,12 +188,12 @@ namespace IIA
   // solve
   bool IA::solve()
   {
-    return ia->solve(false, true, 3, true); // to do, 4th argument is not always true...
+    return ia->solve(true, 3); // to do, 4th argument is not always true...
   }
   bool IA::solve_feasible()
   {
     assert(0); // not implemented yet, we don't have the flags for skipping improvement
-    return ia->solve(false, true, 3, true); // to do, 4th argument is not always true...
+    return ia->solve(true, 3); // to do, 4th argument is not always true...
   }
   bool IA::is_solved()
   {

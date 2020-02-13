@@ -26,7 +26,8 @@ namespace IIA_Internal
   protected:
     enum MessageType {INFO_MSG, WARNING_MSG, ERROR_MSG, DEBUG_MSG };
     void log_message(MessageType message_type, const std::string &prefix, const char* format, va_list args);
-    std::vector<char> message; // buffer for printing log messages
+    // std::vector<char> message; // buffer for printing log messages
+    char message[2048]; // buffer for printing log messages
     bool line_start = true;
     MessageType last_message_type = INFO_MSG;
     

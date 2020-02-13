@@ -46,12 +46,19 @@ void test_problem_1()
 
 	IIA::IA ia;
   ia.get_result()->message_log = &std::cout;
+  
+  ia.get_result()->log_info = true;
+  ia.get_result()->log_warning = true;
+  ia.get_result()->log_error = true;
+  ia.get_result()->log_debug = true;
+  
 	ia.resize(1,2);
 	std::vector<int> cols = {0, 1};
 	std::vector<int> vals = {1, -1};
 	ia.set_row(0,cols,vals);
-	ia.set_goal(0,1);
-	ia.set_goal(1,4);
+  ia.set_goal(0,1);
+  ia.set_goal(1,4);
+  ia.set_goal(1,4);
 	ia.solve();
 
 	test_result(ia);

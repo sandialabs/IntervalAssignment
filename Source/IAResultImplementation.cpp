@@ -9,7 +9,7 @@ namespace IIA_Internal
   
   IAResultImplementation::IAResultImplementation()
   {
-    message.reserve(2048);
+    // message.reserve(2048);
   }
   
   IAResultImplementation::~IAResultImplementation()
@@ -71,21 +71,22 @@ namespace IIA_Internal
     // need a newline and prefix?
     if (last_message_type != message_type)
     {
-      (*message_log) << "\n";
-      line_start = true;
+      if (!line_start)
+      {
+        (*message_log) << "\n";
+        line_start = true;
+      }
       last_message_type = message_type;
     }
     
     // convert format, args to the message buffer
-    bool print_ellipsis = false;
-    {
-      
       // put formatted output into message buffer
-      message.clear();
-      auto len = vsnprintf(message.data(), message.capacity()-4, format, args);
-      print_ellipsis = (len > message.capacity()-6);
-      
-    }
+//      message.clear();
+//      auto len = vsnprintf(message.data(), message.capacity()-4, format, args);
+//      print_ellipsis = (len > message.capacity()-6);
+//      message.resize(len);
+    auto len = vsnprintf(message, 2048-4, format, args);
+    bool print_ellipsis = (len > 2048-6);
     
     // conditionally print prefix
     if (line_start)
@@ -93,10 +94,13 @@ namespace IIA_Internal
       (*message_log) << prefix;
     }
     
+    if (len==0)
+      return;
+    
     // print message
     {
-      for (auto c : message)
-        (*message_log) << c;
+      for (int i=0; i < len; ++i)
+        (*message_log) << message[i];
     }
     
     // print "..." if the message was too long to fit in the buffer
@@ -105,7 +109,7 @@ namespace IIA_Internal
       (*message_log) << "..." << "\n";
     }
     
-    if (message.back() == '\n')
+    if (message[len-1] == '\n')
     {
       line_start = true;
       // flush?

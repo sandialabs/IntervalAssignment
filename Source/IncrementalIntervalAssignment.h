@@ -217,11 +217,10 @@ protected:
   //   map means solve everything except the sum-even constraints (possibly return a non-integer solution)
   //   even means solve all constraints, return an integer solution
   //   if row_min and row_max are passed in, then we only try to solve the subproblems involving those rows and ignore ones not containing those rows.
-  bool solve_map (int create_groups, int report_only, int create_infeasible_groups, int do_map, int do_pave, int row_min = -1, int row_max = -1 );
-  bool solve_even(int create_groups, int report_only, int create_infeasible_groups, int do_map, int do_pave, int row_min = -1, int row_max = -1 );
+  bool solve_map (int do_map, int do_pave, int row_min = -1, int row_max = -1 );
+  bool solve_even(int do_map, int do_pave, int row_min = -1, int row_max = -1 );
 
-  // protected virtual methods
-protected:
+public:
   // Add a new row in the middle of a solve, after the size has been frozen.
   //   Typical usage is for enforcing submap non-overlap "U" constraints, because there are two constraints we could add,
   //   and which one is best is not determined until we have a rough solution.
@@ -268,12 +267,10 @@ private:
   void gather_solutions( std::vector<IncrementalIntervalAssignment*> &sub_problems );
   void gather_solution( IncrementalIntervalAssignment* sub_problem );
 
-  int solve_sub(int create_infeasible_groups);
+  int solve_sub();
   int solve_sub_even();
   void copy_submatrix(std::vector <int> *rows, std::vector <int> *columns,
                               int *row_map, int *column_map, IncrementalIntervalAssignment *target );
-  void copy_solution_to_sub  ( int i, IncrementalIntervalAssignment *sub_problem, int sub_i );
-  void copy_solution_from_sub( int i, IncrementalIntervalAssignment *sub_problem, int sub_i );
   void copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem );
 
 
@@ -456,14 +453,15 @@ public:
   void add_more_columns();
   void add_more_rows();
 
+  void count_used_rows_cols();
 
-  int next_available_row( ConstraintType constraint_type);
+  int next_available_row( ConstraintType constraint_type = IIA::EQ);
   void set_constraint(int row, ConstraintType constraint_type) {constraint[row]=constraint_type;}
   ConstraintType get_constraint(int row) {return constraint[row];}
 
   // int set_row_is_sum_even(int row, MRefEntity *ref_entity, int dummy_coeff, int dummy_bound);
 
-  bool solve( int create_groups, int report_flag, int scheme_flag, bool first_time );
+  bool solve( bool first_time = true, int scheme_flag = 3 );
 
   // return true if a row is something like "0 = 3" or some other obviously bad constraint
   bool infeasible_constraints();
@@ -509,6 +507,10 @@ public:
 
 protected:
   
+  // actually resize the vectors to number_of_rows and number_of_cols
+  void resize_rows();
+  void resize_cols();
+
   // for the tied-to columns we keep this
   struct tied_datum
   {
@@ -538,9 +540,6 @@ protected:
   // amount we need to change the intervals to make it satisfy its variable bounds.
   // + = need to increase, - = need to decrease. Uses passed in value v rather than IIA's solution value
   int compute_out_of_bounds(int c, int v);
-  // compute the number of goal intervals
-  // int compute_goal(int c); // rounded to nearest int
-  double compute_goal_float(int c);
 
   bool verify_full_solution(bool print_unsatisfied_constraints);
 

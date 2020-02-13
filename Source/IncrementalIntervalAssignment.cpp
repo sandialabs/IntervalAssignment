@@ -31,6 +31,8 @@
 //   get rid of the +1 indexing when subdividing the problem.  check for inefficient array searches
 //   beautify output, decide about prefix strings, only start a new message if we have a lf at the end of the string...
 //   organize like methods
+//   combine solve_map and solve_even into one function
+//   std::vector -> using std::vector,  vector
 //   cmake
 //   test on a few compilers
 
@@ -5037,49 +5039,48 @@ bool MatrixSparseInt::multiply(const std::vector<int> &x, std::vector<int> &y)
 
 void IncrementalIntervalAssignment::copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem )
 {
-  // set lower/upper bounds in sub-problem.  Just copy from parent problem.
+  // set lower/upper bounds, etc., in sub-problem.
   for (int c = 0; c < sub_problem->lastCopiedCol; c++ )
   {
     const auto pc = sub_problem->parent_col(c);
-    const auto p_low = col_lower_bounds[ pc ];
-    sub_problem->col_lower_bounds[c] = p_low;
-    const auto p_up = col_upper_bounds[ pc ];
-    sub_problem->col_upper_bounds[c] = p_up;
+    sub_problem->col_lower_bounds[c] = col_lower_bounds[ pc ];
+    sub_problem->col_upper_bounds[c] = col_upper_bounds[ pc ];
+    sub_problem->col_type[c]         = col_type[pc];
+    sub_problem->goals[c]            = goals[pc];
+    sub_problem->col_solution[c]     = col_solution[pc];
   }
 }
 
 void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std::vector <int> *pCols,
                                                    int *row_map, int *col_map, IncrementalIntervalAssignment *target )
 {
-  IncrementalIntervalAssignment *target_program = dynamic_cast<IncrementalIntervalAssignment*>(target);
-  assert(target_program);
   // for ( r : rows )
   //   target_row = row_map[r]
   //   copy this row r into target row target_row
   //     covert this column c into target column col_map[c]
-  target_program->used_row=pRows->size()-1;
-  target_program->used_col=pCols->size()-1;
+  target->used_row=pRows->size()-1;
+  target->used_col=pCols->size()-1;
   
   for (auto r1 : *pRows)
   {
     auto r=r1-1;
     const auto t = row_map[r];
     assert(t>=0);
-    assert(t<=target_program->used_row);
+    assert(t<=target->used_row);
     for (size_t i = 0; i < rows[r].cols.size(); ++i)
     {
       auto c = rows[r].cols[i];
       auto d = col_map[c];
       if (d>=0)
       {
-        target_program->rows[t].cols.push_back(d);
-        target_program->rows[t].vals.push_back(rows[r].vals[i]);
+        target->rows[t].cols.push_back(d);
+        target->rows[t].vals.push_back(rows[r].vals[i]);
       }
     }
-    assert((size_t)t<target_program->rhs.size());
-    assert((size_t)t<target_program->constraint.size());
-    target_program->rhs[t]=rhs[r];
-    target_program->constraint[t]=constraint[r];
+    assert((size_t)t<target->rhs.size());
+    assert((size_t)t<target->constraint.size());
+    target->rhs[t]=rhs[r];
+    target->constraint[t]=constraint[r];
   }
 
   for (auto c1 : *pCols)
@@ -5088,11 +5089,11 @@ void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std
     assert(c>=0);
     const auto d = col_map[c];
     assert(d>=0);
-    assert(d<=target_program->used_col);
-    assert(d<(int)target_program->col_solution.size());
-    target_program->col_solution[d]=col_solution[c];
-    target_program->col_lower_bounds[d]=col_lower_bounds[c];
-    target_program->col_upper_bounds[d]=col_upper_bounds[c];
+    assert(d<=target->used_col);
+    assert(d<(int)target->col_solution.size());
+    target->col_solution[d]=col_solution[c];
+    target->col_lower_bounds[d]=col_lower_bounds[c];
+    target->col_upper_bounds[d]=col_upper_bounds[c];
     
   }
 
@@ -5103,7 +5104,7 @@ void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std
       auto r=r1-1;
       assert(r>=0);
       const auto t = row_map[r];      
-      target_program->row_names[t]=row_names[r];
+      target->row_names[t]=row_names[r];
     }
     for (auto c1 : *pCols)
     {
@@ -5111,13 +5112,13 @@ void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std
       assert(c>=0);
       const auto d = col_map[c];
       assert(d>=0);
-      assert(d<=target_program->used_col);
-      target_program->col_names[d]=col_names[c];
+      assert(d<=target->used_col);
+      target->col_names[d]=col_names[c];
     }
   }
   
   // if there is some column without an associated row, we will have missed it, but that should be OK
-  target_program->fill_in_cols_from_rows();
+  target->fill_in_cols_from_rows();
   
 }
 
@@ -5139,37 +5140,67 @@ int IncrementalIntervalAssignment::next_available_row( ConstraintType constraint
     return used_col;
   }
   
-
-
-  void IncrementalIntervalAssignment::add_more_rows()
+  void IncrementalIntervalAssignment::count_used_rows_cols()
   {
-    // const auto old_rows = number_of_rows;
-    number_of_rows = (number_of_rows * 3) / 2 + 8;
+    int max_r = -1, max_c = -1;
+    for (int r = 0; r < number_of_rows; ++r)
+    {
+      auto &row_cols = rows[r].cols;
+      if (!row_cols.empty())
+      {
+        max_r = r;
+      }
+      for (auto c : row_cols)
+      {
+        max_c = std::max(c, max_c);
+      }
+    }
+    used_row = max_r;
+    used_col = max_c;
+  }
+
+
+  void IncrementalIntervalAssignment::resize_rows()
+  {
+    // use number_of_xxx not how many are used so far
     rows.resize(number_of_rows);
-    rhs.resize(number_of_rows);
-    constraint.resize(number_of_rows);
+    constraint.resize(number_of_rows,EQ);
+    rhs.resize(number_of_rows,0);
+    
     if (names_exist())
     {
       row_names.resize(number_of_rows);
     }
   }
   
-  void IncrementalIntervalAssignment::add_more_columns()
+  void IncrementalIntervalAssignment::resize_cols()
   {
-    const auto old_cols = number_of_cols;
-    number_of_cols = (number_of_cols * 3) / 2 + 8;
-    const auto col_increase = old_cols - number_of_cols;
-    numDummies+=col_increase; // all the new columns are dummy variables, and belong at the end
+    // default to standard for an interval variable INT_VAR range [1,inf], goal 1.
     col_rows.resize(number_of_cols);
-    col_lower_bounds.resize(number_of_cols,0);
-    col_upper_bounds.resize(number_of_cols,0);
+    col_lower_bounds.resize(number_of_cols,1);
+    col_upper_bounds.resize(number_of_cols,std::numeric_limits<int>::max());
     col_solution.resize(number_of_cols,0);
-    col_type.resize(number_of_cols,UNKNOWN_VAR);
+    col_type.resize(number_of_cols,INT_VAR);
+    goals.resize(number_of_cols,1.);
     
     if (names_exist())
     {
       col_names.resize(number_of_cols);
     }
+  }
+
+  void IncrementalIntervalAssignment::add_more_rows()
+  {
+    // const auto old_rows = number_of_rows;
+    number_of_rows = (number_of_rows * 3) / 2 + 8;
+    resize_rows();
+  }
+  
+  void IncrementalIntervalAssignment::add_more_columns()
+  {
+    number_of_cols = (number_of_cols * 3) / 2 + 8;
+    resize_cols();
+    
     // we only add_more_columns on parent problems, and only allocate tied_variables on sub_problems
     //  if (!tied_variables.empty() || old_cols==0)
     //  {
@@ -5294,41 +5325,10 @@ void IncrementalIntervalAssignment::freeze_problem_size()
   // add a dummy variable for inequality rows
   // zzyk to do: ensure we are told how many there are going to be
   // for now, allocate space for one dummy per row
-  add_dummy_variable(number_of_rows, false);
+  // add_dummy_variable(number_of_rows, false);
   
-  // use number_of_xxx not how many are used so far
-  rows.resize(number_of_rows);
-  constraint.resize(number_of_rows,EQ);
-  rhs.resize(number_of_rows,0);
-
-  // col_vars.resize(number_of_cols);
-  col_rows.resize(number_of_cols);
-  col_lower_bounds.resize(number_of_cols,std::numeric_limits<int>::lowest());
-  col_upper_bounds.resize(number_of_cols,std::numeric_limits<int>::max());
-  col_solution.resize(number_of_cols,0);
-  col_type.resize(number_of_cols,UNKNOWN_VAR);
-
-
-  if (names_exist())
-  {
-    row_names.resize(number_of_rows);
-    col_names.resize(number_of_cols);
-  }
-}
-
-// copy from relaxed solution, not linear program solution
-void IncrementalIntervalAssignment::copy_solution_to_sub  ( int i, IncrementalIntervalAssignment *sub_problem, int sub_i )
-{
-  IncrementalIntervalAssignment* sub_iia = dynamic_cast<IncrementalIntervalAssignment*>(sub_problem);
-  assert(sub_iia);
-  sub_iia->col_solution[sub_i]=col_solution[i];
-}
-// copy from linear program solution, not relaxed solution
-void IncrementalIntervalAssignment::copy_solution_from_sub( int i, IncrementalIntervalAssignment *sub_problem, int sub_i )
-{
-  IncrementalIntervalAssignment* sub_iia = dynamic_cast<IncrementalIntervalAssignment*>(sub_problem);
-  assert(sub_iia);
-  col_solution[i]=sub_iia->col_solution[sub_i];
+  resize_rows();
+  resize_cols();
 }
 
 // make these inline at some point
@@ -5569,12 +5569,11 @@ int IncrementalIntervalAssignment::solve_sub_even()
   // This happens for a single paving face, where the variables were not in any mapping subproblem and so are uninitialized
   assign_vars_goals(false);
   
-  
-  return solve_sub(true); // false?
+  return solve_sub();
 }
 
 
-int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
+int IncrementalIntervalAssignment::solve_sub()
 {
   // solve a mapping subproblem
   //   get row echelon form
@@ -5603,6 +5602,8 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
     // generate the upper/lower bounds/goals for the tied-to variables
     if (!generate_tied_data())
     {
+      result->constraints_satisfied=false;
+      result->bounds_satisfied=false;
       return false;
     }
 
@@ -5666,6 +5667,9 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
     
     if (!rref_OK)
     {
+      result->error=true;
+      result->constraints_satisfied=false;
+      result->bounds_satisfied=false;
       return false;
     }
     
@@ -5685,6 +5689,8 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
     
     if (!is_feasible)
     {
+      result->constraints_satisfied=false;
+      result->bounds_satisfied=false;
       return false;
     }
     
@@ -5759,6 +5765,7 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   
   if (!in_bounds)
   {
+    result->bounds_satisfied=false;
     return false;
   }
   
@@ -5815,38 +5822,30 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   return true;
 }
 
-  bool IncrementalIntervalAssignment::solve(int create_groups,
-                                            int report_flag,
-                                            int scheme_flag,
-                                            bool first_time)
-{
-  result->info_message("Running incremental interval assignment.\n"); // comment take this out when IIA is the default
-  result->debug_message("Running IIA.\n");
-  
-  if (result->log_debug||result->log_debug)
+  bool IncrementalIntervalAssignment::solve(bool first_time, int scheme_flag)
   {
+    result->info_message("Running incremental interval assignment.\n");
+    
     if (result->log_debug)
+    {
       print_problem("full problem initial before setup");
-    else
-      print_problem_summary("full problem initial before setup");
-  }
+      // print_problem_summary("full problem initial before setup");
+    }
 
   CpuTimer total_timer;
   
   if (solved_used_row<0)
     first_time=true;
   
-  const int report_only = report_flag == 1;
-  const int create_infeasible_groups = report_flag == 2;
-  const int do_pave = scheme_flag >= 2;
-  const int do_map = ( scheme_flag & 1 ) > 0;
+  const bool do_pave = scheme_flag >= 2;
+  const bool do_map = ( scheme_flag & 1 ) > 0;
   int new_row_min = -1, new_row_max = -1;
   
   // convert inequalities into equalities with dummy variables
   double setup_time=0, map_time(0.);
   if (first_time)
   {
-    freeze_problem_size();
+    count_used_rows_cols();
     
     int num_converted=0;
     for (int r = 0; r <= used_row; ++r)
@@ -5864,7 +5863,7 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
         col_lower_bounds[c]=0;
         
         // constraint[r] is now EQ;
-        // change it so if we call this again, we don't re-add variables
+        // change it so if we call this again then we don't re-add variables
         constraint[r]=EQ;
         
         if (names_exist())
@@ -5937,9 +5936,13 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
     return false;
   }
 
+    // satisfied unless something failes later
+    result->constraints_satisfied=true;
+    result->bounds_satisfied=true;
+    
   // solve mapping constraints, do these separately first for efficiency
   result->debug_message("Solving IIA mapping subproblems.\n");
-  bool success = solve_map(create_groups, report_only, create_infeasible_groups, do_map, do_pave, new_row_min, new_row_max);
+  bool success = solve_map(do_map, do_pave, new_row_min, new_row_max);
 
   if (result->log_debug)
   {
@@ -5961,7 +5964,7 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
       //   if it was true, then we already did the adjustments we should have when solving the mapping phase
       //   if we adjust again, it may "undo" the mapping solution and cause problems.
       should_adjust_solution_tied_variables = false;
-      success = solve_even(create_groups, report_only, create_infeasible_groups, do_map, do_pave, new_row_min, new_row_max);
+      success = solve_even(do_map, do_pave, new_row_min, new_row_max);
     }
   }
   if (success)
@@ -5993,12 +5996,11 @@ int IncrementalIntervalAssignment::solve_sub(int create_infeasible_groups)
   }
   // debug
   
-  return success;
+    result->solved = success;
+    return success;
 }
 
-bool IncrementalIntervalAssignment::solve_map(int create_groups,
-                                     int report_only, int create_infeasible_groups,
-                                     int do_map, int do_pave, int row_min, int row_max )
+bool IncrementalIntervalAssignment::solve_map(int do_map, int do_pave, int row_min, int row_max )
 {
   if (!do_map)
   {
@@ -6028,23 +6030,22 @@ bool IncrementalIntervalAssignment::solve_map(int create_groups,
   {
     auto *sub_problem = sub_problems[i];
     
-    if ( create_groups )
+    if (result->log_debug)
     {
       result->debug_message("Mapping subproblem %d of %d:\n", i+1, num_subs);
       sub_problem->print_problem_summary( "subproblem " + std::to_string(i+1) + " of " + std::to_string(num_subs) );
     }
-    if ( !report_only )
+
+    if (sub_problem->solve_sub() != true)
     {
-      if (sub_problem->solve_sub( create_infeasible_groups) != true)
+      success = false;
+      if (result->log_info)
       {
-        success = false;
-        if (result->log_info)
-        {
-          result->warning_message("Mapping subproblem %d of %d was infeasible.\n",
-                        num_subs - i, num_subs );
-        }
+        result->warning_message("Mapping subproblem %d of %d was infeasible.\n",
+                                num_subs - i, num_subs );
       }
     }
+    
     // timing
     if (result->log_debug)
     {
@@ -6067,9 +6068,7 @@ bool IncrementalIntervalAssignment::solve_map(int create_groups,
   return success;
 }
 
-bool IncrementalIntervalAssignment::solve_even(int create_groups,
-                                      int report_only, int create_infeasible_groups,
-                                      int do_map, int do_pave, int row_min, int row_max )
+bool IncrementalIntervalAssignment::solve_even(int do_map, int do_pave, int row_min, int row_max )
 {
   if (!do_pave)
   {
@@ -6077,7 +6076,7 @@ bool IncrementalIntervalAssignment::solve_even(int create_groups,
     return true;
   }
 
-  if (result->log_debug||result->log_debug)
+  if (result->log_debug)
     result->info_message("Solving interval matching sum-even phase.\n");
 
   // subdivide based on sum-even constraints.
@@ -6091,23 +6090,22 @@ bool IncrementalIntervalAssignment::solve_even(int create_groups,
   {
     auto *sub_problem = sub_problems[i];
     
-    if ( create_groups )
+    if (result->log_debug)
     {
       result->debug_message("Sum-even (Paving) subproblem %d of %d:\n", i+1, num_subs);
       sub_problem->print_problem_summary( "subproblem " + std::to_string(i+1) + " of " + std::to_string(num_subs) );
     }
-    if ( !report_only ) {
-      if ( sub_problem->solve_sub_even() == false )
+    
+    if ( sub_problem->solve_sub_even() == false )
+    {
+      success = false;
+      if (result->log_info)
       {
-        success = false;
-        // create a group for the infeasible subproblem
-        if (result->log_info)
-        {
-          result->warning_message("Interval Matching subproblem is infeasible\n");
-          sub_problem->print_problem_summary("");
-        }
+        result->warning_message("Interval Matching subproblem is infeasible\n");
+        sub_problem->print_problem_summary("");
       }
     }
+    
   }
   
   // gather sub-problem solutions back into this problem, copy solution to permanent storage
@@ -6591,10 +6589,6 @@ void IncrementalIntervalAssignment::recursively_add_edge(int int_var_column,
           auto this_col = sub_cols[c] -1; //-1 because it starts at 1 not 0
           column_map[ this_col ] = c;
           sub_problem->parentCols[c] = this_col;
-          
-          sub_problem->col_type[c] = col_type[this_col];
-          copy_solution_to_sub(this_col, sub_problem, c);
-          
         }
         
         // set row map
@@ -6605,27 +6599,27 @@ void IncrementalIntervalAssignment::recursively_add_edge(int int_var_column,
           sub_problem->parentRows[r] = this_row;
         }
         
+        // uses the parentCols
         copy_bounds_to_sub( sub_problem );
         
         copy_submatrix( &sub_rows, &sub_cols, row_map.data(), column_map.data(), sub_problem );
         
         sub_problems.push_back( sub_problem );
         
-        // title, for debugging
+        // debug
         if (names_exist())
         {
           std::string title = "subproblem ";
           title += std::to_string(sub_problems.size());
           sub_problem->set_problem_name( title.c_str() );
         }
-        
-        // debug
         if (result->log_debug)
         {
           std::string title = "subproblem ";
           title += std::to_string(sub_problems.size());
           sub_problem->print_problem_summary(title);
         }
+        // debug
         
       }
     }
@@ -6655,7 +6649,6 @@ void IncrementalIntervalAssignment::delete_subproblems( std::vector<IncrementalI
   sub_problems.clear();
 }
 
-
 void IncrementalIntervalAssignment::gather_solution( IncrementalIntervalAssignment* sub_problem )
 {
   assert(sub_problem->parentProblem == this);
@@ -6665,10 +6658,9 @@ void IncrementalIntervalAssignment::gather_solution( IncrementalIntervalAssignme
   // for each column, copy the solution of the sub-problem into the parent
   for (int e=0; e < sub_problem->lastCopiedCol; e++ )
   {
-    auto &sub_column = e;
-    auto this_column = sub_problem->parentCols[ sub_column ];
-    assert( this_column >= 0 && this_column < number_of_cols );
-    copy_solution_from_sub( this_column, sub_problem, sub_column );
+    const auto c = sub_problem->parentCols[ e ];
+    assert( c >= 0 && c < number_of_cols );
+    col_solution[ c ] = sub_problem->col_solution[e];
   }
 }
 
