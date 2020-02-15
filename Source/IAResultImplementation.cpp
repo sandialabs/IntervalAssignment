@@ -40,7 +40,7 @@ namespace IIA_Internal
     log_message( WARNING_MSG, "WARNING: ", format, args);
     va_end(args);
   }
-
+  
   void IAResultImplementation::error_message(const char* format, ...)
   {
     if (!message_log || !log_error)
@@ -51,7 +51,7 @@ namespace IIA_Internal
     log_message( ERROR_MSG, "ERROR: ", format, args);
     va_end(args);
   }
-
+  
   void IAResultImplementation::debug_message(const char* format, ...)
   {
     if (!message_log || !log_debug)
@@ -80,11 +80,11 @@ namespace IIA_Internal
     }
     
     // convert format, args to the message buffer
-      // put formatted output into message buffer
-//      message.clear();
-//      auto len = vsnprintf(message.data(), message.capacity()-4, format, args);
-//      print_ellipsis = (len > message.capacity()-6);
-//      message.resize(len);
+    // put formatted output into message buffer
+    //      message.clear();
+    //      auto len = vsnprintf(message.data(), message.capacity()-4, format, args);
+    //      print_ellipsis = (len > message.capacity()-6);
+    //      message.resize(len);
     auto len = vsnprintf(message, 2048-4, format, args);
     bool print_ellipsis = (len > 2048-6);
     
@@ -128,7 +128,7 @@ namespace IIA_Internal
     if (lf)
       result->info_message("\n");
   }
-
+  
   void print_vec(IAResultImplementation *result, const std::vector< std::pair<int,int> > &vec)
   {
     if (!result->message_log)
@@ -137,7 +137,7 @@ namespace IIA_Internal
       result->info_message(" %d(%d)", v.first, v.second);
     result->info_message("\n");
   }
-
+  
   void print_set(IAResultImplementation *result, const std::set< std::pair<int,int> > &aset)
   {
     if (!result->message_log)
@@ -155,6 +155,6 @@ namespace IIA_Internal
       result->info_message(" %d(%d)", m.first, m.second);
     result->info_message("\n");
   }
-
+  
   
 } // namespace

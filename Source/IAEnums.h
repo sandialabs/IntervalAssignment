@@ -5,9 +5,9 @@
 
 namespace IIA
 {
-	enum ConstraintType {EQ, LE, GE, EVEN, FREE, BAD};
-	//                   ==, <=, >=, =2k,
-
+  enum ConstraintType {EQ, LE, GE, EVEN, FREE, BAD};
+  //                   ==, <=, >=, =2k,
+  
 }
 
 #endif

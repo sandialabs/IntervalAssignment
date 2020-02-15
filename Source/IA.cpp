@@ -10,7 +10,7 @@ namespace IIA
 {
   using IIA_Internal::IncrementalIntervalAssignment;
   using IIA_Internal::IAResultImplementation;
-
+  
   // can't be inline because we need the non-stubbed version of IncrementalIntervalAssignment
   IA::IA() : free_row(0)
   {
@@ -39,32 +39,32 @@ namespace IIA
   
   void IA::reserve(size_t nrows, size_t ncols)
   {
-    ia->reserve_rows(nrows);
-    ia->reserve_cols(ncols);
+    ia->reserve_rows((int)nrows);
+    ia->reserve_cols((int)ncols);
   }
   void IA::reserve_rows(size_t nrows)
   {
-    ia->reserve_rows(nrows);
+    ia->reserve_rows((int)nrows);
   }
   void IA::reserve_cols(size_t ncols)
   {
-    ia->reserve_cols(ncols);
+    ia->reserve_cols((int)ncols);
   }
   
   void IA::resize(size_t nrows, size_t ncols)
   {
-    ia->reserve_rows(nrows);
-    ia->reserve_cols(ncols);
+    ia->reserve_rows((int)nrows);
+    ia->reserve_cols((int)ncols);
     ia->freeze_problem_size();
   }
   void IA::resize_rows(size_t nrows)
   {
-    ia->reserve_rows(nrows);
+    ia->reserve_rows((int)nrows);
     ia->freeze_problem_size();
   }
   void IA::resize_cols(size_t ncols)
   {
-    ia->reserve_cols(ncols);
+    ia->reserve_cols((int)ncols);
     ia->freeze_problem_size();
   }
   
@@ -88,6 +88,15 @@ namespace IIA
   {
     return ia->next_dummy();
   }
+  int IA::new_row(int num_rows)
+  {
+    return ia->new_row(num_rows);
+  }
+  int IA::new_col(int num_cols)
+  {
+    return ia->new_col(num_cols);
+  }
+
   void IA::set_row(int row, std::vector<int> &cols, std::vector<int> &vals)
   {
     ia->set_M(row, cols, vals);
@@ -188,18 +197,19 @@ namespace IIA
   // solve
   bool IA::solve()
   {
-    return ia->solve(true, 3); // to do, 4th argument is not always true...
+    // works for re-solving, too
+    return ia->solve(false, 3);
   }
   bool IA::solve_feasible()
   {
     assert(0); // not implemented yet, we don't have the flags for skipping improvement
-    return ia->solve(true, 3); // to do, 4th argument is not always true...
+    return ia->solve(true, 3);
   }
   bool IA::is_solved()
   {
     return ia->get_is_solved();
   }
-
+  
   int IA::get_solution(int col) const
   {
     return ia->get_solution(col);

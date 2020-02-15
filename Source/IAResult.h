@@ -20,12 +20,12 @@ namespace IIA
     constraints_satisfied = false,
     bounds_satisfied = false,
     optimized = false;
-
+    
     // The remainder are mutable so caller can set them from IIA::IA::get_result()
-
+    
     // Feedback that something went wrong. Caller can clear it.
     mutable bool error = false;
-
+    
     // Caller can choose where text messages go, if anywhere.
     mutable std::ostream *message_log = nullptr;
     
@@ -36,7 +36,7 @@ namespace IIA
     log_info=false,
     log_debug=false;
   };
-
+  
 }
 
 #endif
