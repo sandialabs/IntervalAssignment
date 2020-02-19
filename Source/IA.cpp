@@ -96,6 +96,10 @@ namespace IIA
   {
     return ia->new_col(num_cols);
   }
+  void IA::clear_row(int row)
+  {
+    ia->clear_M(row);
+  }
 
   void IA::set_row(int row, std::vector<int> &cols, std::vector<int> &vals)
   {

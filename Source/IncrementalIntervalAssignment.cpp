@@ -17,27 +17,27 @@
 //  x    gather and save as set at beginning of problem. Caller might have defined dummy variables, etc.
 //  x auto determine variable type
 //  x sum-even constraint conversion
-//   method to copy a problem, not the solution
 //  x  fill in new_col
 //  x initialize goals to 1, bounds to 1,inf, etc.
 //  x-skipped int new_row(MRow &Mrow);  convert from MRow to our sparse format
 //  x PRINT_INFO, print_flag, put in log instead
 //  x verify_full_solution, get rid of refentities
-//   IA::solve_feasible, skip improvement phase
 //  x-skipped, leave it for debugging get rid of names?! or convert
 //  x figure out when to sort rows, perhaps a flag as to whether they've been sorted or not
+//   method to copy a problem, not the solution
+//   IA::solve_feasible, skip improvement phase
 //   figure out when to reset the solved flag,
 //   use a tool to determine code that isn't used and delete it
 //  x fill in public interface methods
 //  x get rid of compiler warnings, sign comparision and losing precision, etc.
 //  x auto resizing
 //   fill in test.cpp
-//   test functions
 //   get rid of the +1 indexing when subdividing the problem.  check for inefficient array searches
-//   beautify output, decide about prefix strings, only start a new message if we have a lf at the end of the string...
+//   beautify output
+//   collect public, private methods of IncrementalIntervalAssignment in header file
 //   organize like methods
 //   combine solve_map and solve_even into one function
-//   std::vector -> using std::vector,  vector
+//  x vector -> using vector,  vector
 //   cmake
 //   test on a few compilers
 
@@ -55,6 +55,18 @@ namespace IIA_Internal
   using IIA::FREE;
   using IIA::BAD;
   
+  using std::max;
+  using std::min;
+  using std::lround;
+  using std::copy;
+  using std::swap;
+  using std::sort;
+  using std::make_pair;
+  using std::to_string;
+  using std::iota;
+  using std::lower_bound;
+  using std::back_inserter;
+
   bool IncrementalIntervalAssignment::names_exist() const
   {return false;}
   
@@ -62,11 +74,11 @@ namespace IIA_Internal
   // always returns a positive number, as we take abs of u and v
   int gcd(int u, int v)
   {
-    // if C++17, return std::gcd
+    // if C++17, return gcd
     
     // "The Euclidean Algorithm"
-    auto p = std::max(abs(u),abs(v));
-    auto q = std::min(abs(u),abs(v));
+    auto p = max(abs(u),abs(v));
+    auto q = min(abs(u),abs(v));
     while (true)
     {
       auto r = p % q;
@@ -114,7 +126,7 @@ namespace IIA_Internal
   }
   
   // return the divisor
-  void row_simplify_vals(std::vector<int> &v)
+  void row_simplify_vals(vector<int> &v)
   {
     if (v.empty())
       return;
@@ -154,19 +166,11 @@ namespace IIA_Internal
   
   MatrixSparseInt::MatrixSparseInt(MatrixSparseInt&M,int MaxMRow) : result(M.result)
   {
-    std::copy(M.rows.begin(),M.rows.begin()+MaxMRow,back_inserter(rows));
-    fill_in_cols_from_rows();
-  }
-  void MatrixSparseInt::copy(MatrixSparseInt&M,int MaxMRow)
-  {
-    rows.clear();
-    col_rows.clear();
-    std::copy(M.rows.begin(),M.rows.begin()+MaxMRow,back_inserter(rows));
+    copy(M.rows.begin(),M.rows.begin()+MaxMRow,back_inserter(rows));
     fill_in_cols_from_rows();
   }
   
-  
-  int IncrementalIntervalAssignment::row_sum(const std::vector<int>&cols, const std::vector<int>&coeff, const std::vector<int> &sol, int rhs)
+  int IncrementalIntervalAssignment::row_sum(const vector<int>&cols, const vector<int>&coeff, const vector<int> &sol, int rhs)
   {
     int sum=0;
     assert(cols.size()==coeff.size());
@@ -180,7 +184,7 @@ namespace IIA_Internal
   }
   
   
-  int IncrementalIntervalAssignment::row_sum(const std::vector<int>&cols,const std::vector<int>&coeff, int rhs)
+  int IncrementalIntervalAssignment::row_sum(const vector<int>&cols,const vector<int>&coeff, int rhs)
   {
     return row_sum(cols,coeff,col_solution,rhs);
   }
@@ -207,9 +211,9 @@ namespace IIA_Internal
     {
       if (overwrite || col_solution[i]==0)
       {
-        int v = (int) std::lround( goals[i] );
-        v = std::max(v,col_lower_bounds[i]);
-        v = std::min(v,col_upper_bounds[i]);
+        int v = (int) lround( goals[i] );
+        v = max(v,col_lower_bounds[i]);
+        v = min(v,col_upper_bounds[i]);
         col_solution[i] = v;
       }
     }
@@ -277,16 +281,16 @@ namespace IIA_Internal
     return feasible;
   }
   
-  void IncrementalIntervalAssignment::relevant_rows_cols(const std::vector<int>&seed_cols,
-                                                         std::vector<int>&relevant_cols,
-                                                         std::vector<int>&relevant_rows)
+  void IncrementalIntervalAssignment::relevant_rows_cols(const vector<int>&seed_cols,
+                                                         vector<int>&relevant_cols,
+                                                         vector<int>&relevant_rows)
   {
     for (auto c : seed_cols)
     {
       relevant_rows.insert(relevant_rows.end(), col_rows[c].begin(), col_rows[c].end());
     }
     // rows_fail values should be unique
-    std::set<int>relevant_cols_set;
+    set<int>relevant_cols_set;
     for (auto r : relevant_rows)
     {
       auto &rc=rows[r].cols;
@@ -329,7 +333,7 @@ namespace IIA_Internal
         // default to c1 being the smaller index
         if (c1>c2)
         {
-          std::swap(c1,c2);
+          swap(c1,c2);
         }
         // replace c1 and c2 with what they're tied to, if anything
         if (tied_variables[c1].size()==1)
@@ -346,7 +350,7 @@ namespace IIA_Internal
         // make c1 the bigger set, for efficiency
         if (tied_variables[c1].size() < tied_variables[c2].size())
         {
-          std::swap(c1,c2);
+          swap(c1,c2);
         }
         // c2 is not currently tied
         //   tie c2 to c1
@@ -414,7 +418,7 @@ namespace IIA_Internal
   void IncrementalIntervalAssignment::remove_tied_variables()
   {
     // gather affected rows
-    std::set<int> row_needs_sub;
+    set<int> row_needs_sub;
     
     for (int c=0; (size_t) c<tied_variables.size(); ++c)
     {
@@ -431,7 +435,7 @@ namespace IIA_Internal
     for (auto r : row_needs_sub)
     {
       auto &row = rows[r];
-      std::map<int,int> rowents; // new row values
+      map<int,int> rowents; // new row values
       for (size_t i=0; i<row.cols.size(); ++i)
       {
         int c = row.cols[i];
@@ -689,7 +693,7 @@ namespace IIA_Internal
         // return the *higher* priority
         if (qe<qh)
         {
-          std::swap(qe,qh);
+          swap(qe,qh);
         }
       }
       else
@@ -784,7 +788,7 @@ namespace IIA_Internal
         // return the *higher* priority
         if (qe<qh)
         {
-          std::swap(qe,qh);
+          swap(qe,qh);
         }
       }
       else
@@ -871,7 +875,7 @@ namespace IIA_Internal
     return false;
   }
   
-  void IncrementalIntervalAssignment::QWithReplacement::update(const std::vector<int> &cols)
+  void IncrementalIntervalAssignment::QWithReplacement::update(const vector<int> &cols)
   {
     if (/* DISABLES CODE */ (0) && iia->result->log_debug)
     {
@@ -943,7 +947,7 @@ namespace IIA_Internal
     }
   }
   
-  bool IncrementalIntervalAssignment::tip_top( std::priority_queue<QElement> &Q, SetValuesFn &val_fn, double threshold, QElement &t)
+  bool IncrementalIntervalAssignment::tip_top( priority_queue<QElement> &Q, SetValuesFn &val_fn, double threshold, QElement &t)
   {
     result->debug_message("Q size %d ", (int) Q.size());
     if (Q.empty())
@@ -991,7 +995,7 @@ namespace IIA_Internal
     if (t.valueA<=threshold)
     {
       result->debug_message("Q being emptied.\n");
-      Q = std::priority_queue<QElement>();
+      Q = priority_queue<QElement>();
     }
     result->debug_message("Q tip top %d values %g %g, remaining Q size %d\n", t.c, t.valueA, t.valueB, (int) Q.size());
     
@@ -1012,7 +1016,7 @@ namespace IIA_Internal
     // return false;
   }
   
-  void IncrementalIntervalAssignment::QWithReplacement::build(const std::vector<int> &qcol)
+  void IncrementalIntervalAssignment::QWithReplacement::build(const vector<int> &qcol)
   {
     for (auto c : qcol )
     {
@@ -1020,10 +1024,10 @@ namespace IIA_Internal
     }
   }
   
-  void IncrementalIntervalAssignment::build_Q(std::priority_queue< QElement > &Q,
+  void IncrementalIntervalAssignment::build_Q(priority_queue< QElement > &Q,
                                               SetValuesFn &set_val_fn,
                                               double threshold,
-                                              const std::vector<int> &qcol)
+                                              const vector<int> &qcol)
   {
     for (auto c : qcol )
     {
@@ -1133,9 +1137,9 @@ namespace IIA_Internal
             if (v<0)
             {
               m = col_upper_bounds[c];
-              if (m==std::numeric_limits<int>::max())
+              if (m==numeric_limits<int>::max())
               {
-                sum = std::numeric_limits<int>::lowest(); // sum is unbounded below
+                sum = numeric_limits<int>::lowest(); // sum is unbounded below
                 break;
               }
             }
@@ -1143,9 +1147,9 @@ namespace IIA_Internal
             {
               assert(v>0);
               m = col_lower_bounds[c];
-              if (m==std::numeric_limits<int>::lowest())
+              if (m==numeric_limits<int>::lowest())
               {
-                sum = std::numeric_limits<int>::lowest(); // sum is unbounded below
+                sum = numeric_limits<int>::lowest(); // sum is unbounded below
                 break;
               }
             }
@@ -1176,9 +1180,9 @@ namespace IIA_Internal
             if (v>0)
             {
               m = col_upper_bounds[c];
-              if (m==std::numeric_limits<int>::max())
+              if (m==numeric_limits<int>::max())
               {
-                sum = std::numeric_limits<int>::max(); // sum is unbounded below
+                sum = numeric_limits<int>::max(); // sum is unbounded below
                 break;
               }
             }
@@ -1186,9 +1190,9 @@ namespace IIA_Internal
             {
               assert(v<0);
               m = col_lower_bounds[c];
-              if (m==std::numeric_limits<int>::lowest())
+              if (m==numeric_limits<int>::lowest())
               {
-                sum = std::numeric_limits<int>::max(); // sum is unbounded below
+                sum = numeric_limits<int>::max(); // sum is unbounded below
                 break;
               }
             }
@@ -1214,9 +1218,9 @@ namespace IIA_Internal
   }
   
   
-  bool IncrementalIntervalAssignment::satisfy_constaints(const std::vector<int>&cols_dep,
-                                                         const std::vector<int>&cols_ind,
-                                                         const std::vector<int>&rows_dep)
+  bool IncrementalIntervalAssignment::satisfy_constaints(const vector<int>&cols_dep,
+                                                         const vector<int>&cols_ind,
+                                                         const vector<int>&rows_dep)
   {
     // debug
     CpuTimer *timer(nullptr);
@@ -1243,7 +1247,7 @@ namespace IIA_Internal
     
     // independent vars have already been assigned something
     // back-substitute values from indepedent vars to dependent vars
-    std::vector<int>cols_fail;
+    vector<int>cols_fail;
     if (!assign_dependent_vars(cols_dep,rows_dep,cols_fail))
     {
       // result->info_message("cols_fail B"); print_vec(result, cols_fail);
@@ -1259,7 +1263,7 @@ namespace IIA_Internal
         //   In theory it always finds an integer solution if there is one
         did_hnf=true;
         MatrixSparseInt B(result), U(result);
-        std::vector<int> hnf_col_order;
+        vector<int> hnf_col_order;
         auto OK = HNF(B,U,hnf_col_order);
         if (!OK)
         {
@@ -1305,7 +1309,7 @@ namespace IIA_Internal
     
     bool success(true); // return true if the bounds are satisfied
     
-    std::vector<int>cols_fail;
+    vector<int>cols_fail;
     if (!bounds_satisfied(cols_fail))
     {
       result->debug_message("\nIIA: finding a solution that satisfies the variable bounds\n");
@@ -1327,7 +1331,7 @@ namespace IIA_Internal
       
       // store the blocking column that had the fewest blocking variables
       BlockingCols blocking_cols, all_blocking_cols;
-      std::map<int,int> improved_cols;
+      map<int,int> improved_cols;
       // implicit MB2 order of columns, can be deduced by rows [0,r)
       // continuing the partial elimination of MB2 on subsequent interations is a big speedup, 3x
       MatrixSparseInt MB2(M,MaxMrow);
@@ -1368,7 +1372,7 @@ namespace IIA_Internal
           // if none, try a combination of nullspace vectors...
           bool fixed=false;
           bool give_up=false;
-          int smallest_self_block_coeff=std::numeric_limits<int>::max();
+          int smallest_self_block_coeff=numeric_limits<int>::max();
           {
             int num_block=0;
             blocking_cols.clear();
@@ -1377,7 +1381,7 @@ namespace IIA_Internal
             // use rows that don't make *any* variable closer to its bounds
             //   unique for bounds, which are often one-sided, in contrast to "improve" where we must make tradeoffs
             //   this doesn't seem to help much, but it doesn't hurt
-            std::vector<int> deferred_rows;
+            vector<int> deferred_rows;
             const bool go_in_unbounded_directions_first = true;
             if (go_in_unbounded_directions_first)
             {
@@ -1391,8 +1395,8 @@ namespace IIA_Internal
                   auto c = row.cols[i];
                   auto v = row.vals[i];
                   auto dc = dx * v;
-                  if (( (dc < 0) && (col_lower_bounds[c] != std::numeric_limits<int>::lowest()) ) ||
-                      ( (dc > 0) && (col_upper_bounds[c] != std::numeric_limits<int>::max()   ) ))
+                  if (( (dc < 0) && (col_lower_bounds[c] != numeric_limits<int>::lowest()) ) ||
+                      ( (dc > 0) && (col_upper_bounds[c] != numeric_limits<int>::max()   ) ))
                   {
                     bounded = true;
                     break;
@@ -1446,7 +1450,7 @@ namespace IIA_Internal
                 {
                   result->debug_message("row %d selfblocks col %d\n",(int)m,t.c);
                   // give up later on this variable if it's not possible to get a combination with a smaller coefficient
-                  smallest_self_block_coeff=std::min(smallest_self_block_coeff,self_block_coeff);
+                  smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
                   
                   // give up immediately if the increment is the smallest it could be
                   if (smallest_self_block_coeff==1)
@@ -1524,7 +1528,7 @@ namespace IIA_Internal
                     // give up if we can't get the self_block coefficient smaller
                     if (self_block)
                     {
-                      smallest_self_block_coeff=std::min(smallest_self_block_coeff,self_block_coeff);
+                      smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
                       if (smallest_self_block_coeff==1)
                       {
                         result->debug_message("  Giving up! self_blocking coefficient is 1. latest self_block_coeff=%d.\n", smallest_self_block_coeff);
@@ -1669,21 +1673,21 @@ namespace IIA_Internal
     if (old==blocking_cols.end())
     {
       if (v<0)
-        blocking_cols.emplace(c, std::make_pair(v,block_max));
+        blocking_cols.emplace(c, make_pair(v,block_max));
       else
-        blocking_cols.emplace(c, std::make_pair(block_min,v));
+        blocking_cols.emplace(c, make_pair(block_min,v));
     }
     else
     {
       if (v<0)
       {
         auto &lo = old->second.first;
-        lo = std::max(lo, v);
+        lo = max(lo, v);
       }
       else
       {
         auto &hi = old->second.second;
-        hi = std::min(hi, v);
+        hi = min(hi, v);
       }
     }
   }
@@ -1737,7 +1741,7 @@ namespace IIA_Internal
                                                                 int &self_block_coeff,
                                                                 BlockingCols &blocking_cols,
                                                                 int &num_block,
-                                                                std::map<int,int> &improved_cols)
+                                                                map<int,int> &improved_cols)
   {
     num_block=0;
     const size_t n = mrow.cols.size(); // number of variables changed by mrow
@@ -1747,7 +1751,7 @@ namespace IIA_Internal
       dx=-dx;
     
     // compare t to all the QElements changed by solution+=dx*mrow
-    std::vector<QElement> qold(n), qnew(n);
+    vector<QElement> qold(n), qnew(n);
     int ti = -1; // index of t in the above
     
     // update solution, get new element quality values
@@ -1952,7 +1956,7 @@ namespace IIA_Internal
     // build Q
     QWithReplacement Q(this,priority_fn,priority_threshold);
     // get all the columns, except the tied_variables
-    std::vector<int>untied_int_vars;
+    vector<int>untied_int_vars;
     untied_int_vars.reserve(used_col+1);
     for (int c = 0; (size_t) c < tied_variables.size(); ++c)
     {
@@ -1965,7 +1969,7 @@ namespace IIA_Internal
     // all_blocking_cols are the union blocking_cols from all prior increment attempts
     // improved_cols are the variables that were incremented (since they were added to all_blocking_cols, i.e. since the The  last gaussian elimination call)
     BlockingCols blocking_cols, all_blocking_cols;
-    std::map<int,int> improved_cols;
+    map<int,int> improved_cols;
     // implicit MV2 order of columns, can be deduced by rows [0,r)
     MatrixSparseInt MV2(M,MaxMrow);
     int r=0; // next row of MV2 to reduce
@@ -2026,7 +2030,7 @@ namespace IIA_Internal
         
         bool fixed=false;
         bool give_up=false;
-        int smallest_self_block_coeff=std::numeric_limits<int>::max();
+        int smallest_self_block_coeff=numeric_limits<int>::max();
         // does an existing row work?
         {
           blocking_cols.clear();
@@ -2065,7 +2069,7 @@ namespace IIA_Internal
             else if (self_block)
             {
               // give up later on this variable if it's not possible to get a combination with a smaller coefficient
-              smallest_self_block_coeff=std::min(smallest_self_block_coeff,self_block_coeff);
+              smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
               
               // give up immediately if the increment is the smallest it could be
               if (smallest_self_block_coeff==1)
@@ -2149,7 +2153,7 @@ namespace IIA_Internal
                   // give up if we can't get the self_block coefficient smaller
                   if (self_block)
                   {
-                    smallest_self_block_coeff=std::min(smallest_self_block_coeff,self_block_coeff);
+                    smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
                     if (smallest_self_block_coeff==1)
                     {
                       result->debug_message("  Giving up! self_blocking coefficient is 1. latest self_block_coeff=%d.\n", smallest_self_block_coeff);
@@ -2339,7 +2343,7 @@ namespace IIA_Internal
     
   }
   
-  void IncrementalIntervalAssignment::compute_quality_ratio(std::vector<QElement> &q, std::vector<int> &cols)
+  void IncrementalIntervalAssignment::compute_quality_ratio(vector<QElement> &q, vector<int> &cols)
   {
     SetValuesRatio fn;
     q.clear();
@@ -2367,10 +2371,10 @@ namespace IIA_Internal
         fn.set_values_goal(*this,glo,q.back());
       }
     }
-    std::sort(q.begin(),q.end());
+    sort(q.begin(),q.end());
   }
   
-  bool IncrementalIntervalAssignment::is_better( std::vector<QElement> &qA, std::vector<QElement> &qB)
+  bool IncrementalIntervalAssignment::is_better( vector<QElement> &qA, vector<QElement> &qB)
   {
     // true if A<B by lexicographic min max
     //   true if A[i]<B[i] for some i and A[j]<=B[j] for all j>i
@@ -2423,7 +2427,7 @@ namespace IIA_Internal
     
     bool improved = false;
     
-    std::vector<QElement> qold, qnew;
+    vector<QElement> qold, qnew;
     
     //  print_problem("before fine tune");
     //  M.print_matrix("M");
@@ -2473,13 +2477,13 @@ namespace IIA_Internal
   }
   
   
-  void IncrementalIntervalAssignment::categorize_vars(std::vector<int>&col_order,std::vector<int>&cols_dep, std::vector<int>&cols_ind, std::vector<int>&rows_dep)
+  void IncrementalIntervalAssignment::categorize_vars(vector<int>&col_order,vector<int>&cols_dep, vector<int>&cols_ind, vector<int>&rows_dep)
   {
     cols_dep.reserve(used_row+1); // can't be more *dependent* variables than rows.
     cols_ind.reserve(col_order.size()); // all vars could be independent
     rows_dep.reserve(used_row+1);
     
-    std::vector<int>col_is_dependent(used_col+1,0);
+    vector<int>col_is_dependent(used_col+1,0);
     int first_empty_row=used_row+2; // big value
     for (int r = 0; r <= used_row; ++r)
     {
@@ -2524,11 +2528,11 @@ namespace IIA_Internal
     }
   }
   
-  bool IncrementalIntervalAssignment::adjust_independent_vars(std::vector<int>&cols_fail)
+  bool IncrementalIntervalAssignment::adjust_independent_vars(vector<int>&cols_fail)
   {
     // heuristic: search for another var that only appears in this row, and increment it until we can make the sum divisible by it
     // won't work if there is no such row
-    std::vector<int>still_fail;
+    vector<int>still_fail;
     for (auto c : cols_fail)
     {
       bool fixed=false;
@@ -2573,9 +2577,9 @@ namespace IIA_Internal
     return cols_fail.empty() ? true : false;
   }
   
-  bool IncrementalIntervalAssignment::assign_dependent_vars(const std::vector<int>&cols_dep,
-                                                            const std::vector<int>&rows_dep,
-                                                            std::vector<int>&cols_fail)
+  bool IncrementalIntervalAssignment::assign_dependent_vars(const vector<int>&cols_dep,
+                                                            const vector<int>&rows_dep,
+                                                            vector<int>&cols_fail)
   {
     assert(cols_dep.size()==rows_dep.size());
     bool OK=true;
@@ -2634,8 +2638,8 @@ namespace IIA_Internal
       for (int i=1; (size_t) i<tied_variables[c].size(); ++i)
       {
         int c2 = tied_variables[c][i];
-        lo = std::max(lo,col_lower_bounds[c2]);
-        hi = std::min(hi,col_upper_bounds[c2]);
+        lo = max(lo,col_lower_bounds[c2]);
+        hi = min(hi,col_upper_bounds[c2]);
         
         auto g = goals[c2];
         if (g==0.)
@@ -2665,7 +2669,7 @@ namespace IIA_Internal
     return true;
   }
   
-  bool IncrementalIntervalAssignment::bounds_satisfied(std::vector<int>&cols_fail)
+  bool IncrementalIntervalAssignment::bounds_satisfied(vector<int>&cols_fail)
   {
     cols_fail.clear();
     for ( int c=0; c <= used_col; ++c)
@@ -2695,9 +2699,9 @@ namespace IIA_Internal
     }
   }
   
-  bool IncrementalIntervalAssignment::create_nullspace(const std::vector<int>&cols_dep,
-                                                       const std::vector<int>&cols_ind,
-                                                       const std::vector<int>&rows_dep,
+  bool IncrementalIntervalAssignment::create_nullspace(const vector<int>&cols_dep,
+                                                       const vector<int>&cols_ind,
+                                                       const vector<int>&rows_dep,
                                                        MatrixSparseInt&M,
                                                        int &MaxMrow)
   {
@@ -2784,12 +2788,12 @@ namespace IIA_Internal
   }
   
   // Partion A and B: C = A cap B.  A = A \ B.  B = B \ A.
-  void remove_intersection( std::set<int> &A, std::set<int> &B, std::set<int> &C)
+  void remove_intersection( set<int> &A, set<int> &B, set<int> &C)
   {
     C.clear();
     if (A.empty() || B.empty())
       return;
-    std::set<int> AnotB, BnotA;
+    set<int> AnotB, BnotA;
     auto a=A.begin();
     auto b=B.begin();
     while (true)
@@ -2862,7 +2866,7 @@ namespace IIA_Internal
     
     // Are we stuck?
     // Stuck if there is some variable k with gcd(coeff(k),c_coeff)==1 and it only appears in the same ratio everywhere
-    std::set<int> checked_cols;
+    set<int> checked_cols;
     for (auto r : cr )
     {
       for (auto c : rows[r].cols)
@@ -2935,7 +2939,7 @@ namespace IIA_Internal
     return false;
   }
   
-  void find_new_blocking_col( const BlockingCols &blocking_cols, const BlockingCols &all_blocking_cols, std::vector<int> &new_blocking_cols)
+  void find_new_blocking_col( const BlockingCols &blocking_cols, const BlockingCols &all_blocking_cols, vector<int> &new_blocking_cols)
   {
     for (auto bc : blocking_cols)
     {
@@ -2978,7 +2982,7 @@ namespace IIA_Internal
     matrix_row_swap(r,rr);
   }
   
-  bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking_cols, int max_coeff, std::map<int,int> &improved_cols,
+  bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking_cols, int max_coeff, map<int,int> &improved_cols,
                                              BlockingCols &all_blocking_cols, int &r, int &unblocked_row)
   {
     // if work_hard is true, then we switch which column we reduce when there is a choice and we can't reduce all of them
@@ -3054,7 +3058,7 @@ namespace IIA_Internal
     improved_cols.clear();
     
     // find which blocking cols are new; these are the ones to reduce
-    std::vector<int> new_blocking_cols;
+    vector<int> new_blocking_cols;
     find_new_blocking_col( blocking_cols, all_blocking_cols, new_blocking_cols);
     if (!new_blocking_cols.empty())
     {
@@ -3080,7 +3084,7 @@ namespace IIA_Internal
         // goal is this(r,lead)=1
         // find a row with lead coeff == 1 (or smallest) to pivot to r
         int rr=-1, rr0=-1, rr1=-1, rr2=-1; // the row we will use, and its backups in case there isn't anything ideal
-        int backup_coeff = std::numeric_limits<int>::max();
+        int backup_coeff = numeric_limits<int>::max();
         // search starting from the last rows, as they are the unreduced ones...
         auto &col_r=col_rows[lead];
         for (int i = ((int) col_r.size())-1; i>=0; --i)
@@ -3239,7 +3243,7 @@ namespace IIA_Internal
     }
     
     // look for a good row to return, regardless of whether we actually reduced anything
-    std::set<int> rows_blocked, rows_large_coeff, rows_both;
+    set<int> rows_blocked, rows_large_coeff, rows_both;
     
     // is there a good row with 0 for the blocking coefficients?
     bool print_first=true;
@@ -3356,7 +3360,7 @@ namespace IIA_Internal
     // debug
     if (result->log_debug)
     {
-      if (max_coeff<std::numeric_limits<int>::max())
+      if (max_coeff<numeric_limits<int>::max())
       {
         result->debug_message("IIA: Gaussian elimination unable to find an unblocked vector with a small enough coefficient (<%d) for x%d.\n",max_coeff, col);
       }
@@ -3384,7 +3388,7 @@ namespace IIA_Internal
     return count;
   }
   
-  bool MatrixSparseInt::is_blocked(int v, std::pair<int,int> block)
+  bool MatrixSparseInt::is_blocked(int v, pair<int,int> block)
   {
     assert(block.first<0);
     assert(block.second>0);
@@ -3492,9 +3496,9 @@ namespace IIA_Internal
     }
   }
   
-  std::vector<int> IncrementalIntervalAssignment::column_coeffs(int c)
+  vector<int> IncrementalIntervalAssignment::column_coeffs(int c)
   {
-    std::vector<int> vals;
+    vector<int> vals;
     auto &col = col_rows[c];
     for (size_t i = 0; i < col.size(); ++i)
     {
@@ -3543,11 +3547,11 @@ namespace IIA_Internal
     qe.valueA = - ((int) iia.col_rows[c].size());
     // valueB
     {
-      int smallest_coeff = std::numeric_limits<int>::max();
+      int smallest_coeff = numeric_limits<int>::max();
       for (auto r : iia.col_rows[c])
       {
         const int c_coeff = abs(iia.rows[r].get_val(c));
-        smallest_coeff = std::min( smallest_coeff, c_coeff );
+        smallest_coeff = min( smallest_coeff, c_coeff );
       }
       qe.valueB = -smallest_coeff;
     }
@@ -3564,9 +3568,9 @@ namespace IIA_Internal
       if (fabs(qe.valueB)!=1)
       {
         // sum-even with coefficient 2, don't want to pick it
-        qe.valueA = std::numeric_limits<int>::lowest()/4; // will never get picked, even if it is in only one row
+        qe.valueA = numeric_limits<int>::lowest()/4; // will never get picked, even if it is in only one row
       }
-      qe.valueC = std::numeric_limits<int>::max()/2; // highly desirable: weak bounds, don't care quality, OK if in many nullspace rows
+      qe.valueC = numeric_limits<int>::max()/2; // highly desirable: weak bounds, don't care quality, OK if in many nullspace rows
     }
     else // constraint slack variable
     {
@@ -3575,7 +3579,7 @@ namespace IIA_Internal
       if (iia.col_lower_bounds[c]==iia.col_upper_bounds[c])
       {
         // undesireable, highly constrained to a single value. want it to be independent so it's isolated in its own nullspace row, not dependent on any other slacks
-        qe.valueA = std::numeric_limits<int>::lowest()/2; // this way it will never get picked, even if it is in only one row
+        qe.valueA = numeric_limits<int>::lowest()/2; // this way it will never get picked, even if it is in only one row
       }
       qe.valueC = -1;
     }
@@ -3592,7 +3596,7 @@ namespace IIA_Internal
     
     const int c = qe.c;
     qe.valueB = iia.col_rows[c].size();
-    int best_coeff=std::numeric_limits<int>::max();
+    int best_coeff=numeric_limits<int>::max();
     for (int r : iia.col_rows[c])
     {
       const int c_coeff = abs(iia.rows[r].get_val(c));
@@ -3604,7 +3608,7 @@ namespace IIA_Internal
     qe.valueA=-best_coeff;
     double glo, ghi;
     iia.compute_tied_goals(c,glo,ghi);
-    qe.valueC = (glo==0. ? std::numeric_limits<int>::max()/2 : glo);
+    qe.valueC = (glo==0. ? numeric_limits<int>::max()/2 : glo);
   }
   
   
@@ -3624,7 +3628,7 @@ namespace IIA_Internal
   // Slide 27, totally unimodular ILP solve (which we don't quite have)
   // https://www.isical.ac.in/~arijit/courses/autumn2016/ILP-Lecture-1.pdf
   
-  bool IncrementalIntervalAssignment::rref_elim(int &r, int rr, int c, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
+  bool IncrementalIntervalAssignment::rref_elim(int &r, int rr, int c, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
     const bool do_print = false; // debug bool do_print = (c==1354);
     if (do_print) result->debug_message(" rref filling in row %d (diagonal is col %d) ", r, c );
@@ -3659,7 +3663,7 @@ namespace IIA_Internal
         v = -v;
       }
       rhs[r]=-rhs[r];
-      // print_problem("RREF post negating row " +std::to_string(r) + " to make column " + std::to_string(c) + " entry positive ");
+      // print_problem("RREF post negating row " +to_string(r) + " to make column " + to_string(c) + " entry positive ");
     }
     
     // debug
@@ -3699,15 +3703,15 @@ namespace IIA_Internal
     return -1;
   };
   
-  bool IncrementalIntervalAssignment::rref_step0(int &rref_r, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
+  bool IncrementalIntervalAssignment::rref_step0(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
     result->debug_message("rref_step0\n");
     // Collect vars that are already reduced
     // Use any var that has a "1" for a coefficient, and there is only one row that contains that variable
-    std::priority_queue<QElement> Q;
+    priority_queue<QElement> Q;
     SetValuesOneCoeff val_OneCoeff_Q;
-    std::vector<int>all_vars(used_col+1);
-    std::iota(all_vars.begin(),all_vars.end(),0);
+    vector<int>all_vars(used_col+1);
+    iota(all_vars.begin(),all_vars.end(),0);
     const double threshold=0.1; // 0 is bad, 1 is good
     build_Q(Q, val_OneCoeff_Q, threshold, all_vars);
     
@@ -3731,14 +3735,14 @@ namespace IIA_Internal
     return true;
   }
   
-  bool IncrementalIntervalAssignment::rref_step_numrows(int &rref_r, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
+  bool IncrementalIntervalAssignment::rref_step_numrows(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
     result->debug_message("rref_step_numrows\n");
-    std::priority_queue<QElement> Q;
+    priority_queue<QElement> Q;
     SetValuesNumCoeff val_NumCoeff;
-    std::vector<int>all_vars(used_col+1);
-    std::iota(all_vars.begin(),all_vars.end(),0);
-    const double threshold=std::numeric_limits<double>::lowest(); // anything is fine
+    vector<int>all_vars(used_col+1);
+    iota(all_vars.begin(),all_vars.end(),0);
+    const double threshold=numeric_limits<double>::lowest(); // anything is fine
     build_Q(Q, val_NumCoeff, threshold, all_vars);
     
     QElement t;
@@ -3778,16 +3782,7 @@ namespace IIA_Internal
     return true;
   }
   
-  void IncrementalIntervalAssignment::dump_var(int c)
-  {
-    result->info_message("dump_var %d\n", c);
-    print_col_iia(c);
-    for (auto r : col_rows[c])
-      print_row_iia(r);
-    result->info_message("dump_var %d end\n", c);
-  }
-  
-  bool IncrementalIntervalAssignment::rref_step1(int &rref_r, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
+  bool IncrementalIntervalAssignment::rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
     if (rref_r>used_row)
       return true;
@@ -3795,9 +3790,9 @@ namespace IIA_Internal
     result->debug_message("rref_step1\n");
     // Use any var that has a "1" for a coefficient in a row,
     
-    std::priority_queue<QElement> Q;
+    priority_queue<QElement> Q;
     SetValuesCoeffRowsGoal val_CoeffRowsGoal_Q;
-    std::vector<int>all_vars;
+    vector<int>all_vars;
     all_vars.reserve(used_col+1);
     // don't use a threshold, because coefficients can get worse then get better again
     const double threshold=-1.5; //-1 means a coeff with a 1, smaller means a larger coefficient
@@ -3895,7 +3890,7 @@ namespace IIA_Internal
     return true;
   }
   
-  bool IncrementalIntervalAssignment::rref_step2(int &rref_r, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
+  bool IncrementalIntervalAssignment::rref_step2(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
     if (rref_r>used_row)
       return true;
@@ -3909,7 +3904,7 @@ namespace IIA_Internal
       row_simplify(rr);
     
     // build priority Q
-    std::priority_queue< std::pair<int,int> >  Q; // gcd,col
+    priority_queue< pair<int,int> >  Q; // gcd,col
     for (int c=0; c<=used_col;++c)
     {
       if (rref_col_map[c]==-1)
@@ -3951,7 +3946,7 @@ namespace IIA_Internal
           auto &cr = col_rows[c];
           {
             int best_row=-1;
-            int best_row_c=std::numeric_limits<int>::max();
+            int best_row_c=numeric_limits<int>::max();
             for (size_t i=0; i<cr.size(); ++i)
             {
               if (cr[i]>=rref_r)
@@ -3974,7 +3969,7 @@ namespace IIA_Internal
             }
             assert(best_row>-1);
             assert(best_row<(int)rows.size());
-            assert(best_row_c<std::numeric_limits<int>::max());
+            assert(best_row_c<numeric_limits<int>::max());
             row_swap(rref_r,best_row);
           }
           
@@ -4050,7 +4045,7 @@ namespace IIA_Internal
     return true;
   }
   
-  bool IncrementalIntervalAssignment::rref_stepZ(int &rref_r, std::vector<int> &rref_col_order, std::vector<int> &rref_col_map)
+  bool IncrementalIntervalAssignment::rref_stepZ(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
     result->debug_message("rref_stepZ\n");
     for (int c=0; c<=used_col; ++c)
@@ -4096,7 +4091,7 @@ namespace IIA_Internal
     return true;
   }
   
-  bool IncrementalIntervalAssignment::rref_constraints(std::vector<int> &rref_col_order)
+  bool IncrementalIntervalAssignment::rref_constraints(vector<int> &rref_col_order)
   {
     // rref data
     // col_order is implicit order of columns, the sequence in which rref eliminated them
@@ -4109,7 +4104,7 @@ namespace IIA_Internal
     
     // map from true column c to the index in which c appears in col_order
     // last entry is a safety, always -1
-    std::vector<int> rref_col_map(col_size,-1);
+    vector<int> rref_col_map(col_size,-1);
     
     int rref_r=0; // next row to reduce
     
@@ -4137,7 +4132,7 @@ namespace IIA_Internal
     return true;
   }
   
-  bool IncrementalIntervalAssignment::rref_improve(std::vector<int> &rref_col_order)
+  bool IncrementalIntervalAssignment::rref_improve(vector<int> &rref_col_order)
   {
     // rref data
     // col_order is implicit order of columns, the sequence in which rref eliminated them
@@ -4150,7 +4145,7 @@ namespace IIA_Internal
     
     // map from true column c to the index in which c appears in col_order
     // last entry is a safety, always -1
-    std::vector<int> rref_col_map(col_size,-1);
+    vector<int> rref_col_map(col_size,-1);
     
     int rref_r=0; // next row to reduce
     
@@ -4167,22 +4162,22 @@ namespace IIA_Internal
     return true;
   }
   
-  void MatrixSparseInt::row_union(int r, int s, std::vector<int> &rsc)
+  void MatrixSparseInt::row_union(int r, int s, vector<int> &rsc)
   {
     auto &rc=rows[r].cols;
     auto &sc=rows[s].cols;
-    std::set_union(rc.begin(),rc.end(),
+    set_union(rc.begin(),rc.end(),
                    sc.begin(),sc.end(),
-                   std::back_inserter(rsc));
+                   back_inserter(rsc));
   }
   
-  void MatrixSparseInt::col_union(int c, int d, std::vector<int> &cdr)
+  void MatrixSparseInt::col_union(int c, int d, vector<int> &cdr)
   {
     auto &cr = col_rows[c];
     auto &dr = col_rows[d];
-    std::set_union(cr.begin(),cr.end(),
+    set_union(cr.begin(),cr.end(),
                    dr.begin(),dr.end(),
-                   std::back_inserter(cdr));
+                   back_inserter(cdr));
   }
   
   void MatrixSparseInt::matrix_row_swap(int r, int s)
@@ -4199,7 +4194,7 @@ namespace IIA_Internal
     rows[r].vals.swap(rows[s].vals);
     
     // find colums in r or s
-    std::vector<int>rsc;
+    vector<int>rsc;
     row_union(r,s,rsc);
     // update columns that contain r or s
     for (auto c : rsc)
@@ -4210,7 +4205,7 @@ namespace IIA_Internal
         else if (t==s) t=r;
       }
       // to do: potential speedup, keep track of indices of t and s, and just sort between those indices
-      std::sort(col_rows[c].begin(),col_rows[c].end());
+      sort(col_rows[c].begin(),col_rows[c].end());
     }
   }
   
@@ -4226,8 +4221,8 @@ namespace IIA_Internal
     // swap rows
     matrix_row_swap(r,s);
     
-    std::swap(rhs[r],rhs[s]);
-    std::swap(constraint[r],constraint[s]);
+    swap(rhs[r],rhs[s]);
+    swap(constraint[r],constraint[s]);
     
     // IIA specific stuff
     if (names_exist())
@@ -4236,7 +4231,7 @@ namespace IIA_Internal
     // swap data from IncrementalIntervalAssignment
     if (parentProblem)
     {
-      std::swap(parentRows[r],parentRows[s]);
+      swap(parentRows[r],parentRows[s]);
     }
   }
   
@@ -4278,7 +4273,7 @@ namespace IIA_Internal
         
         // matrix_row_us_minus_vr(r, s, u, v);
         // matrix_row_us_minus_vr(rows[r], rows[s], s, &col_rows, u, v);
-        int min_val = std::numeric_limits<int>::max()/2;
+        int min_val = numeric_limits<int>::max()/2;
         {
           auto &s_cols=rows[s].cols;
           auto &s_vals=rows[s].vals;
@@ -4303,13 +4298,13 @@ namespace IIA_Internal
               new_cols.push_back(   r_cols[i]);
               const auto nv = -v*r_vals[i];
               new_vals.push_back(nv);
-              min_val = std::min(min_val, abs(nv));
+              min_val = min(min_val, abs(nv));
               
               // let variable r_cols[i] know that it has a non-zero in row s (and it was zero before)
               auto &crow = col_rows[r_cols[i]];
               // add s to crow, maintaining the sorted order
               crow.push_back(s);
-              std::inplace_merge(crow.begin(), prev(crow.end()), crow.end()); // restore sorted order
+              inplace_merge(crow.begin(), prev(crow.end()), crow.end()); // restore sorted order
               
               ++i;
             }
@@ -4319,7 +4314,7 @@ namespace IIA_Internal
               new_cols.push_back(  s_cols[j]);
               const auto nv =    u*s_vals[j];
               new_vals.push_back(nv);
-              min_val = std::min(min_val, abs(nv));
+              min_val = min(min_val, abs(nv));
               ++j;
             }
             // both r[i],s[j] are non-zero
@@ -4333,7 +4328,7 @@ namespace IIA_Internal
               {
                 new_cols.push_back( r_cols[i]);
                 new_vals.push_back( nv );
-                min_val = std::min(min_val, abs(nv));
+                min_val = min(min_val, abs(nv));
               }
               else
               {
@@ -4343,8 +4338,8 @@ namespace IIA_Internal
                   // let variable r_cols[i] know that it no longer has a non-zero in row s
                   auto &crow = col_rows[r_cols[i]];
                   // remove s from crow, maintaining the sort
-                  auto next = std::upper_bound(crow.begin(),crow.end(),s);
-                  std::move(next,crow.end(),prev(next));
+                  auto next = upper_bound(crow.begin(),crow.end(),s);
+                  move(next,crow.end(),prev(next));
                   crow.pop_back();
                 }
               }
@@ -4398,7 +4393,7 @@ namespace IIA_Internal
     matrix_row_us_minus_vr(rows[r], s_row, -1, nullptr, u, v);
   }
   
-  void MatrixSparseInt::matrix_row_us_minus_vr(const RowSparseInt &r_row, RowSparseInt &s_row, int s, std::vector< std::vector<int> > *col_rows_loc, int u, int v)
+  void MatrixSparseInt::matrix_row_us_minus_vr(const RowSparseInt &r_row, RowSparseInt &s_row, int s, vector< vector<int> > *col_rows_loc, int u, int v)
   {
     assert(u!=0);
     assert(v!=0);
@@ -4434,7 +4429,7 @@ namespace IIA_Internal
           auto &crow = (*col_rows_loc)[r_cols[i]];
           // add s to crow, maintaining the sorted order
           crow.push_back(s);
-          std::inplace_merge(crow.begin(), prev(crow.end()), crow.end()); // restore sorted order
+          inplace_merge(crow.begin(), prev(crow.end()), crow.end()); // restore sorted order
         }
         
         ++i;
@@ -4466,8 +4461,8 @@ namespace IIA_Internal
             auto &crow = (*col_rows_loc)[r_cols[i]];
             // result->info_message("column %d's rows, before removing row %d\n",r_cols[i],s); print_vec(result, crow);
             // remove s from crow, maintaining the sort
-            auto next = std::upper_bound(crow.begin(),crow.end(),s);
-            std::move(next,crow.end(),prev(next));
+            auto next = upper_bound(crow.begin(),crow.end(),s);
+            move(next,crow.end(),prev(next));
             crow.pop_back();
             // result->info_message("column %d's rows, after removing row %d\n",r_cols[i],s); print_vec(result, crow);
           }
@@ -4491,7 +4486,7 @@ namespace IIA_Internal
       if (row_names[s].size()<max_size)
       {
         // append "(*u-v*Rowr)", e.g. "(*2-3*Row4)"
-        row_names[s] = row_names[s] + "(*" + std::to_string(u) + (abs(v)<0 ? "+" : "") + std::to_string(v) + "*Row" + std::to_string(r) +")";
+        row_names[s] = row_names[s] + "(*" + to_string(u) + (abs(v)<0 ? "+" : "") + to_string(v) + "*Row" + to_string(r) +")";
         if (row_names[s].size()>=max_size)
         {
           row_names[s] = row_names[s] + "...";
@@ -4569,7 +4564,7 @@ namespace IIA_Internal
     }
   }
   
-  bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, std::vector<int> &hnf_col_order)
+  bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order)
   {
     if (result->log_debug)
     {
@@ -4615,7 +4610,7 @@ namespace IIA_Internal
     identity(U, this_cols);
     
     hnf_col_order.resize(this_cols);
-    std::iota(hnf_col_order.begin(),hnf_col_order.end(),0);
+    iota(hnf_col_order.begin(),hnf_col_order.end(),0);
     
     // debug
     if (result->log_debug)
@@ -4684,7 +4679,7 @@ namespace IIA_Internal
         // find row with smallest coeff (they are all positive)
         small_r=-1;
         extra_nonzeros=0;
-        int small_v=std::numeric_limits<int>::max(); // coefficient of the row with the smallest coefficient
+        int small_v=numeric_limits<int>::max(); // coefficient of the row with the smallest coefficient
         
         for (int br : B.col_rows[hnf_r])
         {
@@ -4762,7 +4757,7 @@ namespace IIA_Internal
       // swap small_r into hnf_r
       B.matrix_row_swap(small_r,hnf_r);
       U.matrix_row_swap(small_r,hnf_r);
-      std::swap(hnf_col_order[small_r], hnf_col_order[hnf_r]);
+      swap(hnf_col_order[small_r], hnf_col_order[hnf_r]);
       
       if (/* DISABLES CODE */ (0))
       {
@@ -4836,8 +4831,8 @@ namespace IIA_Internal
     MatrixSparseInt BT(result), UT(result);
     B.transpose(BT);
     U.transpose(UT);
-    std::swap(BT,B);
-    std::swap(UT,U);
+    swap(BT,B);
+    swap(UT,U);
     
     // debug
     if (result->log_debug)
@@ -4892,7 +4887,7 @@ namespace IIA_Internal
     return true;
   }
   
-  bool IncrementalIntervalAssignment::HNF_satisfy_constraints(MatrixSparseInt &B, MatrixSparseInt &U, std::vector<int> &hnf_col_order)
+  bool IncrementalIntervalAssignment::HNF_satisfy_constraints(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order)
   {
     // Let e = [B^{−1}b, 0, 0, . . . , 0] where e is a vector of length n with first m entries B^{−1}b
     // If e is integral, then output Uc, else output "no solution"
@@ -4903,7 +4898,7 @@ namespace IIA_Internal
     // multiply e by U,  solution = Ue
     // verify solution, if good, return true, else return false;
     
-    std::vector<int> e(used_col+1,0); // rhs == b
+    vector<int> e(used_col+1,0); // rhs == b
                                       // cc are the unassigned variables, coming from the redundant constraints
     
     // backsub
@@ -5014,7 +5009,7 @@ namespace IIA_Internal
     return satisfied;
   }
   
-  bool MatrixSparseInt::multiply(const std::vector<int> &x, std::vector<int> &y)
+  bool MatrixSparseInt::multiply(const vector<int> &x, vector<int> &y)
   {
     if (col_rows.size()!=x.size())
     {
@@ -5057,7 +5052,7 @@ namespace IIA_Internal
     }
   }
   
-  void IncrementalIntervalAssignment::copy_submatrix(std::vector <int> *pRows, std::vector <int> *pCols,
+  void IncrementalIntervalAssignment::copy_submatrix(vector <int> *pRows, vector <int> *pCols,
                                                      int *row_map, int *col_map, IncrementalIntervalAssignment *target )
   {
     // for ( r : rows )
@@ -5145,8 +5140,8 @@ namespace IIA_Internal
     // change if from an INT_VAR to a DUMMY_VAR
     col_type[used_col]=DUMMY_VAR;
     goals[used_col]=0;
-    col_lower_bounds[used_col] = std::numeric_limits<int>::lowest();
-    col_upper_bounds[used_col] = std::numeric_limits<int>::max();
+    col_lower_bounds[used_col] = numeric_limits<int>::lowest();
+    col_upper_bounds[used_col] = numeric_limits<int>::max();
     return used_col;
   }
 
@@ -5171,7 +5166,7 @@ namespace IIA_Internal
       }
       for (auto c : row_cols)
       {
-        max_c = std::max(c, max_c);
+        max_c = max(c, max_c);
       }
     }
     used_row = max_r;
@@ -5197,7 +5192,7 @@ namespace IIA_Internal
     // default to standard for an interval variable INT_VAR range [1,inf], goal 1.
     col_rows.resize(number_of_cols);
     col_lower_bounds.resize(number_of_cols,1);
-    col_upper_bounds.resize(number_of_cols,std::numeric_limits<int>::max());
+    col_upper_bounds.resize(number_of_cols,numeric_limits<int>::max());
     col_solution.resize(number_of_cols,0);
     col_type.resize(number_of_cols,INT_VAR);
     goals.resize(number_of_cols,1.);
@@ -5282,11 +5277,11 @@ namespace IIA_Internal
   }
   void IncrementalIntervalAssignment::reserve_cols( int num_cols )
   {
-    number_of_cols=std::max(number_of_cols,num_cols);
+    number_of_cols=max(number_of_cols,num_cols);
   }
   void IncrementalIntervalAssignment::reserve_rows( int num_rows )
   {
-    number_of_rows=std::max(number_of_rows,num_rows);
+    number_of_rows=max(number_of_rows,num_rows);
   }
   void IncrementalIntervalAssignment::resize_cols( int num_cols )
   {
@@ -5302,22 +5297,22 @@ namespace IIA_Internal
   
   // from https://stackoverflow.com/questions/17074324/how-can-i-sort-two-vectors-in-the-same-way-with-criteria-that-uses-only-one-of
   template <typename T, typename Compare>
-  std::vector<std::size_t> sort_permutation(const std::vector<T>& vec,
+  vector<size_t> sort_permutation(const vector<T>& vec,
                                             Compare compare)
   {
-    std::vector<std::size_t> p(vec.size());
-    std::iota(p.begin(), p.end(), 0);
-    std::sort(p.begin(), p.end(),
-              [&](std::size_t i, std::size_t j){ return compare(vec[i], vec[j]); });
+    vector<size_t> p(vec.size());
+    iota(p.begin(), p.end(), 0);
+    sort(p.begin(), p.end(),
+              [&](size_t i, size_t j){ return compare(vec[i], vec[j]); });
     return p;
   }
   template <typename T>
-  std::vector<T> apply_permutation(const std::vector<T>& vec,
-                                   const std::vector<std::size_t>& p)
+  vector<T> apply_permutation(const vector<T>& vec,
+                                   const vector<size_t>& p)
   {
-    std::vector<T> sorted_vec(vec.size());
-    std::transform(p.begin(), p.end(), sorted_vec.begin(),
-                   [&](std::size_t i){ return vec[i]; });
+    vector<T> sorted_vec(vec.size());
+    transform(p.begin(), p.end(), sorted_vec.begin(),
+                   [&](size_t i){ return vec[i]; });
     return sorted_vec;
   }
   
@@ -5356,7 +5351,7 @@ namespace IIA_Internal
       for (auto c : cols)
       {
         col_rows[c].push_back(r);
-        used_col=std::max(used_col,c);
+        used_col=max(used_col,c);
       }
     }
   }
@@ -5377,7 +5372,7 @@ namespace IIA_Internal
       auto &cols = rows[r].cols;
       for (auto c : cols)
       {
-        max_col = std::max( max_col, int(c) );
+        max_col = max( max_col, int(c) );
       }
     }
     col_rows.resize(max_col+1);
@@ -5395,7 +5390,7 @@ namespace IIA_Internal
   
   int RowSparseInt::get_val( int col ) const
   {
-    auto found_col = std::lower_bound(cols.begin(),cols.end(),col);
+    auto found_col = lower_bound(cols.begin(),cols.end(),col);
     if (found_col!=cols.end() && *found_col==col)
       return vals[ found_col-cols.begin() ];
     return 0;
@@ -5433,8 +5428,8 @@ namespace IIA_Internal
           }
           else
           {
-            std::swap(cols[i],cols.back());
-            std::swap(vals[i],vals.back());
+            swap(cols[i],cols.back());
+            swap(vals[i],vals.back());
             // cols.pop_back();
             // vals.pop_back();
             // rows[row].sort();
@@ -5453,7 +5448,7 @@ namespace IIA_Internal
       // rows[row].sort();
     }
   }
-  void IncrementalIntervalAssignment::set_M( int row,  std::vector<int> &cols, std::vector<int> &vals )
+  void IncrementalIntervalAssignment::set_M( int row,  vector<int> &cols, vector<int> &vals )
   {
     rows[row].cols.swap(cols);
     rows[row].vals.swap(vals);
@@ -5478,7 +5473,7 @@ namespace IIA_Internal
   {
     if (names_exist())
     {
-      row_names[row]=std::string(name);
+      row_names[row]=string(name);
     }
   }
   const char *IncrementalIntervalAssignment::get_row_name(int row)
@@ -5492,7 +5487,7 @@ namespace IIA_Internal
   void IncrementalIntervalAssignment::set_col_name(int col, const char *name)
   {
     if (names_exist())
-      col_names[col]=std::string(name);
+      col_names[col]=string(name);
   }
   
   const char *IncrementalIntervalAssignment::get_col_name(int col)
@@ -5576,15 +5571,15 @@ namespace IIA_Internal
     const bool do_restore=true;
     
     // satisfy constraints
-    std::vector<int> rref_col_order;
-    std::vector<int>cols_dep, cols_ind, rows_dep;
+    vector<int> rref_col_order;
+    vector<int>cols_dep, cols_ind, rows_dep;
     {
       // save original matrix A,b
       MatrixSparseInt *this_matrix = this;
       EqualsB *this_B = this;
       MatrixSparseInt Asave(*this_matrix);
       EqualsB Bsave(*this_B);
-      std::vector<std::string> row_names_save(row_names);
+      vector<string> row_names_save(row_names);
       
       // row echelon for constraints
       bool rref_OK = rref_constraints(rref_col_order);
@@ -5636,9 +5631,9 @@ namespace IIA_Internal
       // restore original matrix, before rref
       if (do_restore)
       {
-        std::swap(*this_matrix,Asave);
-        std::swap(*this_B,Bsave);
-        std::swap(row_names,row_names_save);
+        swap(*this_matrix,Asave);
+        swap(*this_B,Bsave);
+        swap(row_names,row_names_save);
         
         if (result->log_debug)
         {
@@ -5834,7 +5829,7 @@ namespace IIA_Internal
     
     if (names_exist())
     {
-      col_names[slack_var]="slack_" + std::to_string(slack_var) + "_row_" + std::to_string(r);
+      col_names[slack_var]="slack_" + to_string(slack_var) + "_row_" + to_string(r);
     }
     
     // assign slack variable a value
@@ -5850,7 +5845,7 @@ namespace IIA_Internal
     // convert inequalities into equalities with dummy variables
     int num_even=0, num_ineq=0, num_eq=0, num_new=0;
     const bool is_re_solving = solved_used_row>=0;
-    for (int r = std::max(0,solved_used_row); r <= used_row; ++r)
+    for (int r = max(0,solved_used_row); r <= used_row; ++r)
     {
       const bool row_is_new = (is_re_solving && r>solved_used_row);
       if (row_is_new)
@@ -5873,7 +5868,7 @@ namespace IIA_Internal
         
         if (names_exist())
         {
-          col_names[c]="sum_even_row_" + std::to_string(r);
+          col_names[c]="sum_even_row_" + to_string(r);
         }
         ++num_even;
         
@@ -5905,7 +5900,7 @@ namespace IIA_Internal
         
         if (names_exist())
         {
-          col_names[c]="inequality_freedom_row_" + std::to_string(r);
+          col_names[c]="inequality_freedom_row_" + to_string(r);
         }
         ++num_ineq;
         
@@ -5983,7 +5978,7 @@ namespace IIA_Internal
     count_used_rows_cols();
     
     // sort rows, fill in columns
-    const auto new_row_start=std::max(0,solved_used_row+1);
+    const auto new_row_start=max(0,solved_used_row+1);
     sort_rows(new_row_start);
     fill_in_cols_from_rows(); // could be more efficient about this the second time we are solving
 
@@ -6121,7 +6116,7 @@ namespace IIA_Internal
     }
     
     // subdivide non-sum-even problems into independent components
-    std::vector<IncrementalIntervalAssignment*> sub_problems;
+    vector<IncrementalIntervalAssignment*> sub_problems;
     subdivide_problem( sub_problems, false, row_min, row_max  );
     const auto num_subs = sub_problems.size();
     
@@ -6136,7 +6131,7 @@ namespace IIA_Internal
       if (result->log_debug)
       {
         result->debug_message("Mapping subproblem %d of %d:\n", i+1, num_subs);
-        sub_problem->print_problem_summary( "subproblem " + std::to_string(i+1) + " of " + std::to_string(num_subs) );
+        sub_problem->print_problem_summary( "subproblem " + to_string(i+1) + " of " + to_string(num_subs) );
       }
       
       if (sub_problem->solve_sub() != true)
@@ -6184,7 +6179,7 @@ namespace IIA_Internal
     
     // subdivide based on sum-even constraints.
     // Some equality constraints may not be used
-    std::vector<IncrementalIntervalAssignment*> sub_problems;
+    vector<IncrementalIntervalAssignment*> sub_problems;
     subdivide_problem( sub_problems, true, row_min, row_max );
     const auto num_subs = sub_problems.size();
     
@@ -6196,7 +6191,7 @@ namespace IIA_Internal
       if (result->log_debug)
       {
         result->debug_message("Sum-even (Paving) subproblem %d of %d:\n", i+1, num_subs);
-        sub_problem->print_problem_summary( "subproblem " + std::to_string(i+1) + " of " + std::to_string(num_subs) );
+        sub_problem->print_problem_summary( "subproblem " + to_string(i+1) + " of " + to_string(num_subs) );
       }
       
       if ( sub_problem->solve_sub_even() == false )
@@ -6290,7 +6285,7 @@ namespace IIA_Internal
     return non_zeros;
   }
   
-  void IncrementalIntervalAssignment::print_problem_summary(std::string prefix)
+  void IncrementalIntervalAssignment::print_problem_summary(string prefix)
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -6305,7 +6300,7 @@ namespace IIA_Internal
     // result->info_message("stubbed out\n"); return; // zzyk
   }
   
-  void IncrementalIntervalAssignment::print_problem(std::string prefix)
+  void IncrementalIntervalAssignment::print_problem(string prefix)
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -6340,8 +6335,8 @@ namespace IIA_Internal
       else
         result->info_message("  x%d col", (int) c);
       result->info_message(" bounds=[%s,%s], goal=%f, solution=%d",
-                           (std::numeric_limits<int>::lowest() == col_lower_bounds[c] ? "-inf" : std::to_string(col_lower_bounds[c]).c_str()),
-                           (std::numeric_limits<int>::max()    == col_upper_bounds[c] ? "+inf" : std::to_string(col_upper_bounds[c]).c_str()),
+                           (numeric_limits<int>::lowest() == col_lower_bounds[c] ? "-inf" : to_string(col_lower_bounds[c]).c_str()),
+                           (numeric_limits<int>::max()    == col_upper_bounds[c] ? "+inf" : to_string(col_upper_bounds[c]).c_str()),
                            goals[c],
                            col_solution[c]);
       if (has_tied_variables)
@@ -6366,7 +6361,7 @@ namespace IIA_Internal
     result->info_message("end IA problem\n\n");
   }
   
-  void IncrementalIntervalAssignment::print_problem(std::string prefix, const std::vector<int> &col_order)
+  void IncrementalIntervalAssignment::print_problem(string prefix, const vector<int> &col_order)
   {
     print_problem(prefix);
     result->info_message("^^^^Above columns (variables) are permuted into this order: ");
@@ -6377,7 +6372,7 @@ namespace IIA_Internal
     // auto copy = *this;
   }
   
-  void IncrementalIntervalAssignment::print_solution_summary(std::string prefix)
+  void IncrementalIntervalAssignment::print_solution_summary(string prefix)
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -6387,13 +6382,13 @@ namespace IIA_Internal
                          problem_name.c_str());
     result->info_message("  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
     bool force_been_solved = true;
-    std::swap(force_been_solved,hasBeenSolved);
+    swap(force_been_solved,hasBeenSolved);
     result->info_message("Solution is %s.\n", (verify_full_solution(true) ? "feasible" : "BAD"));
     // might be "BAD" because the tied variables are not assigned values yet...
-    std::swap(force_been_solved,hasBeenSolved);
+    swap(force_been_solved,hasBeenSolved);
   }
   
-  void IncrementalIntervalAssignment::print_solution(std::string prefix)
+  void IncrementalIntervalAssignment::print_solution(string prefix)
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -6408,13 +6403,13 @@ namespace IIA_Internal
       print_solution_col(c);
     }
     bool force_been_solved = true;
-    std::swap(force_been_solved,hasBeenSolved);
+    swap(force_been_solved,hasBeenSolved);
     result->info_message("Solution is %s.\n", (verify_full_solution(true) ? "feasible" : "BAD"));
-    std::swap(force_been_solved,hasBeenSolved);
+    swap(force_been_solved,hasBeenSolved);
     result->info_message("end IA solution\n\n");
   }
   
-  void IncrementalIntervalAssignment::print_solution_row(int r, std::string prefix)
+  void IncrementalIntervalAssignment::print_solution_row(int r, string prefix)
   {
     if (!prefix.empty()) result->info_message("%s ",prefix.c_str());
     auto &row = rows[r];
@@ -6453,7 +6448,7 @@ namespace IIA_Internal
   }
   
   
-  void MatrixSparseInt::print_matrix_summary(std::string prefix)
+  void MatrixSparseInt::print_matrix_summary(string prefix)
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -6466,7 +6461,7 @@ namespace IIA_Internal
                          (unsigned long) num_nonzeros());
   }
   
-  void MatrixSparseInt::print_matrix(std::string prefix)
+  void MatrixSparseInt::print_matrix(string prefix)
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -6503,10 +6498,10 @@ namespace IIA_Internal
   
   void IncrementalIntervalAssignment::recursively_add_edge(int int_var_column,
                                                            int do_sum_even,
-                                                           std::vector<int> &sub_rows,
-                                                           std::vector<int> &sub_cols,
-                                                           std::vector<int> &sub_row_array,
-                                                           std::vector<int> &sub_col_array )
+                                                           vector<int> &sub_rows,
+                                                           vector<int> &sub_cols,
+                                                           vector<int> &sub_row_array,
+                                                           vector<int> &sub_col_array )
   {
     // add int_var_column to list - make sure not already in the list
     assert( !sub_col_array[ int_var_column ] );
@@ -6555,7 +6550,7 @@ namespace IIA_Internal
               if ( col_type[cc]==INT_VAR )
               {
                 // if the true_count is less than the variable bound, use the variable bound
-                const int expected_count = std::max(lo, (int) std::lround(goals[cc]) );
+                const int expected_count = max(lo, (int) lround(goals[cc]) );
                 expected_edge_count += vv * expected_count;
                 min_edge_count      += vv * lo;
               }
@@ -6599,7 +6594,7 @@ namespace IIA_Internal
   }
   
   
-  void IncrementalIntervalAssignment::subdivide_problem(std::vector<IncrementalIntervalAssignment*> &sub_problems,
+  void IncrementalIntervalAssignment::subdivide_problem(vector<IncrementalIntervalAssignment*> &sub_problems,
                                                         bool do_sum_even, int row_min, int row_max )
   {
     // debug
@@ -6607,18 +6602,18 @@ namespace IIA_Internal
     CpuTimer subdivide_timer;
     
     // seen_columns[i] = TRUE if column i is in *any* subproblem.
-    std::vector<int> seen_columns( number_of_cols, 0 );
+    vector<int> seen_columns( number_of_cols, 0 );
     
     // map from row (col) of subproblem to row (col) of parent
-    std::vector <int> sub_rows, sub_cols; // these are indexed from 1, so 0 corresponds to not assigned
+    vector <int> sub_rows, sub_cols; // these are indexed from 1, so 0 corresponds to not assigned
     
     // map from row (col) of this problem to row (col) of subproblem
-    std::vector<int> row_map ( number_of_rows, -1 );
-    std::vector<int> column_map ( number_of_cols, -1 );
+    vector<int> row_map ( number_of_rows, -1 );
+    vector<int> column_map ( number_of_cols, -1 );
     
     // flag if a row or column is in the current subproblem yet.
-    std::vector<int> sub_row_array ( number_of_rows, 0 );
-    std::vector<int> sub_col_array ( number_of_cols, 0 );
+    vector<int> sub_row_array ( number_of_rows, 0 );
+    vector<int> sub_col_array ( number_of_cols, 0 );
     
     // if row_min and row_max are specified, then we just care about subproblems involving the variables in those rows.
     const bool row_subset = (row_min!=-1 && row_max!=-1);
@@ -6640,8 +6635,8 @@ namespace IIA_Internal
         if (sub_rows.size() == 0)
           continue;
         
-        std::sort(sub_rows.begin(),sub_rows.end());
-        std::sort(sub_cols.begin(),sub_cols.end());
+        sort(sub_rows.begin(),sub_rows.end());
+        sort(sub_cols.begin(),sub_cols.end());
         
         // add in the seen columns, zero out the sub_row and sub_col arrays
         for ( auto col : sub_cols )
@@ -6712,14 +6707,14 @@ namespace IIA_Internal
         // debug
         if (names_exist())
         {
-          std::string title = "subproblem ";
-          title += std::to_string(sub_problems.size());
+          string title = "subproblem ";
+          title += to_string(sub_problems.size());
           sub_problem->set_problem_name( title.c_str() );
         }
         if (result->log_debug)
         {
-          std::string title = "subproblem ";
-          title += std::to_string(sub_problems.size());
+          string title = "subproblem ";
+          title += to_string(sub_problems.size());
           sub_problem->print_problem_summary(title);
         }
         // debug
@@ -6743,7 +6738,7 @@ namespace IIA_Internal
     return add_variable( num_variables );
   }
   
-  void IncrementalIntervalAssignment::delete_subproblems( std::vector<IncrementalIntervalAssignment*> &sub_problems )
+  void IncrementalIntervalAssignment::delete_subproblems( vector<IncrementalIntervalAssignment*> &sub_problems )
   {
     for ( auto *s : sub_problems )
     {
@@ -6767,7 +6762,7 @@ namespace IIA_Internal
     }
   }
   
-  void IncrementalIntervalAssignment::gather_solutions( std::vector<IncrementalIntervalAssignment*> &sub_problems )
+  void IncrementalIntervalAssignment::gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems )
   {
     for (auto sub : sub_problems)
     {
@@ -6813,7 +6808,7 @@ namespace IIA_Internal
                                sol,
                                lower);
           ++num_out_of_bounds;
-          worst_out_of_bound=std::max(worst_out_of_bound,lower-sol);
+          worst_out_of_bound=max(worst_out_of_bound,lower-sol);
           rc=false;
         }
         else
@@ -6830,7 +6825,7 @@ namespace IIA_Internal
                                names_exist() ? col_names[c].c_str() : "",
                                sol,
                                upper);
-          worst_out_of_bound=std::max(worst_out_of_bound,sol-upper);
+          worst_out_of_bound=max(worst_out_of_bound,sol-upper);
           ++num_out_of_bounds;
           rc=false;
         }
