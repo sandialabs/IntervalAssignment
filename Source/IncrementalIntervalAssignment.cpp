@@ -188,16 +188,6 @@ namespace IIA_Internal
     return sum;
   }
   
-  
-  int IncrementalIntervalAssignment::row_sum(const vector<int>&cols,const vector<int>&coeff, int rhs)
-  {
-    return row_sum(cols,coeff,col_solution,rhs);
-  }
-  int IncrementalIntervalAssignment::row_sum(int r)
-  {
-    return row_sum(rows[r].cols,rows[r].vals,rhs[r]);
-  }
-  
   void IncrementalIntervalAssignment::solution_init()
   {
     if (solved_used_row>=0)
@@ -256,31 +246,14 @@ namespace IIA_Internal
     }
   }
   
-  void IncrementalIntervalAssignment::relevant_rows_cols(const vector<int>&seed_cols,
-                                                         vector<int>&relevant_cols,
-                                                         vector<int>&relevant_rows)
-  {
-    for (auto c : seed_cols)
-    {
-      relevant_rows.insert(relevant_rows.end(), col_rows[c].begin(), col_rows[c].end());
-    }
-    // rows_fail values should be unique
-    set<int>relevant_cols_set;
-    for (auto r : relevant_rows)
-    {
-      auto &rc=rows[r].cols;
-      relevant_cols_set.insert(rc.begin(),rc.end());
-    }
-    relevant_cols.assign(relevant_cols_set.begin(),relevant_cols_set.end());
-  }
-  
-  // after calling this,
-  //  variables c that are unaffected have empty tied_variables[c]
-  //            c          to be replaced by c2   tied_variables[c]={c2}
-  //            c2         that are the replacement of a,b,...d  have   tied_variables[c]={c2,a,b,...d}
-  
+
   bool IncrementalIntervalAssignment::find_tied_variables()
   {
+    // after calling
+    //  variables c that are unaffected have empty tied_variables[c]
+    //            c          to be replaced by c2   tied_variables[c]={c2}
+    //            c2         that are the replacement of a,b,...d  have   tied_variables[c]={c2,a,b,...d}
+
     assert(tied_variables.empty()); // otherwise need to clear out the data
     tied_variables.resize(number_of_cols);
     
@@ -437,7 +410,6 @@ namespace IIA_Internal
   
   void IncrementalIntervalAssignment::adjust_solution_tied_variables()
   {
-    // return; // zzyk fixes sweep-verification
     for (int c = 0; (size_t) c < tied_variables.size(); ++c)
     {
       // adjust the solution of the tied-to variables only
@@ -445,7 +417,7 @@ namespace IIA_Internal
       {
         auto old_val = col_solution[c];
         
-        auto &td = tied_data[c]; // should already exist
+        auto &td = tied_data.at(c); // should already exist
         
         // assign new solution to be the geometric mean
         auto &lo = td.goal_lo; // shorthand
@@ -3070,26 +3042,6 @@ namespace IIA_Internal
     return new_r;
   }
   
-  int MatrixSparseInt::push_row(int row)
-  {
-    return push_row(rows[row]);
-  }
-  
-  
-  void MatrixSparseInt::pop_row()
-  {
-    if (rows.size())
-    {
-      int last_r = ((int)rows.size())-1;
-      for (auto c : rows[last_r].cols)
-      {
-        assert(col_rows[c].back()==last_r);
-        col_rows[c].pop_back();
-      }
-      rows.resize(last_r);
-    }
-  }
-  
   vector<int> IncrementalIntervalAssignment::column_coeffs(int c) const
   {
     vector<int> vals;
@@ -3130,19 +3082,7 @@ namespace IIA_Internal
     rref_col_order.push_back(c);
     
     // eliminate c from all other rows
-    // matrix_allrows_eliminate_column, plus also update the rhs and any row names
-    if (col_rows[c].size()>1)
-    {
-      kill_rows = col_rows[c]; // copy since row_eliminate_column modifies col_rows[c]
-      for (auto s : kill_rows)
-      {
-        if (s==r)
-        {
-          continue;
-        }
-        row_eliminate_column(r,s,c);
-      }
-    }
+    matrix_allrows_eliminate_column(r,c,&rhs); // plus also update the rhs
     
     // ensure c coefficient is positive, not negative (e.g. 1, not -1)
     if (rows[r].get_val(c)<0)
@@ -3661,15 +3601,6 @@ namespace IIA_Internal
                    back_inserter(rsc));
   }
   
-  void MatrixSparseInt::col_union(int c, int d, vector<int> &cdr)
-  {
-    auto &cr = col_rows[c];
-    auto &dr = col_rows[d];
-    set_union(cr.begin(),cr.end(),
-                   dr.begin(),dr.end(),
-                   back_inserter(cdr));
-  }
-  
   void MatrixSparseInt::matrix_row_swap(int r, int s)
   {
     if (r==s)
@@ -3721,13 +3652,13 @@ namespace IIA_Internal
     }
   }
   
-  void MatrixSparseInt::matrix_allrows_eliminate_column(int r, int c)
+  void MatrixSparseInt::matrix_allrows_eliminate_column(int r, int c, vector<int> *rhs)
   {
     // eliminate c from other rows, except r
     
     // optimized for speed because this takes most of the time when improving
     // It does this:
-    //    kill_rows = col_rows[c]; // copy, since matrix_row_elimination changes col_rows[c]
+    //    auto kill_rows = col_rows[c]; // copy, since matrix_row_elimination changes col_rows[c]
     //    for (auto s : kill_rows)
     //    {
     //      if (s==r)
@@ -3760,10 +3691,9 @@ namespace IIA_Internal
         // matrix_row_us_minus_vr(r, s, u, v);
         // matrix_row_us_minus_vr(rows[r], rows[s], s, &col_rows, u, v);
         int min_val = numeric_limits<int>::max()/2;
+        auto &s_cols=rows[s].cols;
+        auto &s_vals=rows[s].vals;
         {
-          auto &s_cols=rows[s].cols;
-          auto &s_vals=rows[s].vals;
-          
           size_t i=0,j=0; // index into r, s
           const auto jmax=s_cols.size();
           assert(jmax>0);
@@ -3838,8 +3768,24 @@ namespace IIA_Internal
           s_vals.swap(new_vals);
         }
         
-        if (min_val != 1)
-          row_simplify_vals(rows[s].vals);
+        if (rhs)
+        {
+          auto b = u * (*rhs)[s] - v * (*rhs)[r];
+          if (b!=0)
+          {
+            min_val = min(min_val, abs(b));
+            if (min_val != 1)
+            {
+              s_vals.push_back(b);
+              row_simplify_vals(s_vals);
+              b = s_vals.back();
+              s_vals.pop_back();
+            }
+          }
+          (*rhs)[s] = b;
+        }
+        else if (min_val != 1)
+          row_simplify_vals(s_vals);
         // else the row already has a 1, so it can't be simplified, so don't try
         
         assert(rows[s].get_val(c)==0);
@@ -3850,35 +3796,7 @@ namespace IIA_Internal
       col_rows[c].push_back(r);
     }
   }
-  
-  void MatrixSparseInt::matrix_row_eliminate_column(int r, int s, int c, int &u, int &v)
-  {
-    // s = u*s - v*r
     
-    v = rows[s].get_val(c);
-    // quit if entry is already zero
-    if (v==0)
-    {
-      u = 1;
-      return;
-    }
-    u = rows[r].get_val(c); // this doesn't change, could be streamlined, todo optimization
-    matrix_row_us_minus_vr(r, s, u, v);
-  }
-  
-  void MatrixSparseInt::matrix_row_eliminate_column(int r, RowSparseInt &s_row, int c, int &u, int &v)
-  {
-    v = s_row.get_val(c);
-    // quit if entry is already zero
-    if (v==0)
-    {
-      u = 1;
-      return;
-    }
-    u = rows[r].get_val(c);
-    matrix_row_us_minus_vr(rows[r], s_row, -1, nullptr, u, v);
-  }
-  
   void MatrixSparseInt::matrix_row_us_minus_vr(const RowSparseInt &r_row, RowSparseInt &s_row, int s, vector< vector<int> > *col_rows_loc, int u, int v)
   {
     assert(u!=0);
@@ -3980,14 +3898,6 @@ namespace IIA_Internal
     this->matrix_row_us_minus_vr(r,s,u,v);
     multiply_rhs(r,s,u,v);
   }
-  
-  void IncrementalIntervalAssignment::row_eliminate_column(int r, int s, int c)
-  {
-    int u(1),v(1);
-    this->matrix_row_eliminate_column(r,s,c,u,v);
-    multiply_rhs(r,s,u,v);
-  }
-  
   
   void MatrixSparseInt::transpose(MatrixSparseInt &T,  size_t num_rows, size_t num_cols)
   {
@@ -4381,12 +4291,6 @@ namespace IIA_Internal
       if (coeff==0)
       {
         e[r]=1;
-        // if (rs!=0)
-        // {
-        // result->warning_message("HNF not full rank, row_sum[%d] = %d != 0 but coeff[%d] = 0\n", r, rs, coeff);
-        // result->warning_message("HNF no solution, overconstrained, because row_sum[%d] = %d != 0 but coeff[%d] = 0\n", r, rs, coeff);
-        // return false;
-        // }
       }
       else if (rs % coeff)
       {
@@ -4645,6 +4549,12 @@ namespace IIA_Internal
     // we only resize_cols on parent problems, and only allocate tied_variables on sub_problems
   }
   
+  void IncrementalIntervalAssignment::freeze_problem_size()
+  {
+    resize_rows();
+    resize_cols();
+  }
+  
   void IncrementalIntervalAssignment::add_more_rows()
   {
     // const auto old_rows = number_of_rows;
@@ -4691,28 +4601,7 @@ namespace IIA_Internal
     }
     return return_col;
   }
-
   
-  void IncrementalIntervalAssignment::freeze_problem_size()
-  {
-    resize_rows();
-    resize_cols();
-  }
-  
-  // make these inline at some point
-  int IncrementalIntervalAssignment::add_variable( int num_variables )
-  {
-    auto rc=number_of_cols;
-    number_of_cols+=num_variables;
-    return rc;
-  }
-  
-  int IncrementalIntervalAssignment::add_constraint( int num_constraints )
-  {
-    auto rc=number_of_rows;
-    number_of_rows+=num_constraints;
-    return rc;
-  }
   void IncrementalIntervalAssignment::reserve_cols( int num_cols )
   {
     number_of_cols=max(number_of_cols,num_cols);
@@ -4721,17 +4610,6 @@ namespace IIA_Internal
   {
     number_of_rows=max(number_of_rows,num_rows);
   }
-  void IncrementalIntervalAssignment::resize_cols( int num_cols )
-  {
-    reserve_cols(num_cols);
-    freeze_problem_size();
-  }
-  void IncrementalIntervalAssignment::resize_rows( int num_rows )
-  {
-    reserve_rows(num_rows);
-    freeze_problem_size();
-  }
-  
   
   // from https://stackoverflow.com/questions/17074324/how-can-i-sort-two-vectors-in-the-same-way-with-criteria-that-uses-only-one-of
   template <typename T, typename Compare>
@@ -5938,10 +5816,9 @@ namespace IIA_Internal
         sub_problem->parentRows.resize( sub_rows.size() );
         sub_problem->parentCols.resize( sub_cols.size() );
         
-        sub_problem->add_variable  ((int)sub_cols.size());
-        sub_problem->add_constraint((int)sub_rows.size());
-        
-        sub_problem->lastCopiedCol = (int)sub_cols.size();
+        sub_problem->lastCopiedCol =  (int)sub_cols.size();
+        sub_problem->number_of_cols = (int)sub_cols.size();
+        sub_problem->number_of_rows = (int)sub_rows.size();
         
         sub_problem->freeze_problem_size();
         
@@ -5994,26 +5871,21 @@ namespace IIA_Internal
     sub_problems.clear();
   }
   
-  void IncrementalIntervalAssignment::gather_solution( IncrementalIntervalAssignment* sub_problem )
-  {
-    assert(sub_problem->parentProblem == this);
-    if ( !sub_problem->get_is_solved() )
-      return;
-    
-    // for each column, copy the solution of the sub-problem into the parent
-    for (int e=0; e < sub_problem->lastCopiedCol; e++ )
-    {
-      const auto c = sub_problem->parentCols[ e ];
-      assert( c >= 0 && c < number_of_cols );
-      col_solution[ c ] = sub_problem->col_solution[e];
-    }
-  }
-  
   void IncrementalIntervalAssignment::gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems )
   {
     for (auto sub : sub_problems)
     {
-      gather_solution(sub);
+      assert(sub->parentProblem == this);
+      if ( !sub->get_is_solved() )
+        continue;
+      
+      // for each column, copy the solution of the sub-problem into the parent
+      for (int e=0; e < sub->lastCopiedCol; e++ )
+      {
+        const auto c = sub->parentCols[ e ];
+        assert( c >= 0 && c < number_of_cols );
+        col_solution[ c ] = sub->col_solution[e];
+      }
     }
     delete_subproblems( sub_problems );
   }

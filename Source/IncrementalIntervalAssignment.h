@@ -58,6 +58,13 @@ namespace IIA_Internal
   };
   struct MatrixSparseInt
   {
+  public: // methods
+
+    // constructor
+    MatrixSparseInt(IAResultImplementation *result_ptr) : result(result_ptr){}
+    // copy constructor, copies up to row MaxMRow
+    MatrixSparseInt(MatrixSparseInt&M,int MaxMRow);
+
     const IAResultImplementation *get_result() const {return result;}
 
     // nontrivial, adds up the number of non-zeros in all rows
@@ -70,15 +77,10 @@ namespace IIA_Internal
     void print_matrix_summary(string prefix=string()) const;
     void print_matrix(string prefix=string()) const;
     
-    // s = u*s - v*r, with u and v chosen so that s[c]==0
-    // standard call
+    // s = u*s - v*r
     void matrix_row_us_minus_vr(int r, int s, int u, int v) { matrix_row_us_minus_vr(rows[r], rows[s], s, &col_rows, u, v); }
-    // s = u*s - v*r, with u and v chosen so that s[c]==0
-    void matrix_row_eliminate_column(int r, RowSparseInt &s_row, int c, int &u, int &v); // s_row not in matrix
-    void matrix_row_eliminate_column(int r, RowSparseInt &s_row, int c) {int u,v; matrix_row_eliminate_column(r, s_row, c, u, v);} // s_row not in matrix
-    void matrix_row_eliminate_column(int r, int s, int c, int &u, int &v);
-    void matrix_row_eliminate_column(int r, int s, int c) {int u,v; matrix_row_eliminate_column(r,s,c,u,v);}
-    void matrix_allrows_eliminate_column(int r, int c); // eliminate c from all rows except r
+    // s = u*s - v*r, with u and v chosen so that s[c]==0, for all rows s containing c except r
+    void matrix_allrows_eliminate_column(int r, int c, vector<int> *rhs = nullptr); // eliminate c from all rows except r
     
     // Gaussian elimination, specialized for creating a new_row that isn't blocked (that we know of).
     // starting from row 0, as if blocking_cols[0] was the first column etc.
@@ -87,51 +89,6 @@ namespace IIA_Internal
     bool gaussian_elimination(int col, const BlockingCols &blocking_cols, int max_coeff, map<int,int> &improved_cols,
                               BlockingCols &all_blocking_cols, int &r, int &unblocked_row);
 
-  protected:
-    
-    // modify row (by row operations) so the coefficient of col < max_coeff
-    //   here r is the last row that gaussian elimination diagonalized
-    bool reduce_coefficient(int row, int col, int r, int max_coeff);
-
-    // return true if row has a blocking coefficient when trying to increment col,
-    // could modify to return the blocking cols
-    bool is_row_blocked(int row, int col, const BlockingCols &blocking_cols );
-    static
-    bool is_blocked(int v, pair<int,int> block); // true if v is outside (int,int) as an integer interval
-                                                      // true if the coefficients for column col are such that their gcd >= max_coeff
-    
-    bool coefficient_irreducible(int col, int max_coeff);
-    
-    // unreduce c by row swaps and updating r; and remove c from all_blocking_cols
-    void unreduce(int &r, int c, BlockingCols &all_blocking_cols);
-    
-    // counts the number of columns blocking bounds, i.e. a positive and negative block adds 2 to the count
-    static
-    size_t blocking_size(BlockingCols &blocking_cols);
-    
-    // workhorse implementation
-    void matrix_row_us_minus_vr(const RowSparseInt &r_row, RowSparseInt &s_row, int s, vector< vector<int> > *col_rows_loc, int u, int v);
-    
-  private:
-    // re-used workspace for matrix_row_us_minus_vr
-    vector<int> new_cols, new_vals;
-    
-  protected: // data
-    vector<int> kill_rows;
-    
-  public: // data,
-    IAResultImplementation *result;
-    
-    // public so IncrementalIntervalAssignment methods can access and manipulate them directly for nullspace matrices, etc.
-    vector<RowSparseInt> rows;
-    vector< vector<int> > col_rows;
-
-    
-  protected: // methods
-
-    void print_map(const BlockingCols &amap) const;
-
-  public:
     
     // swap rows, update columns
     void matrix_row_swap(int r, int s);
@@ -149,18 +106,48 @@ namespace IIA_Internal
     
     // set rsc to be the columns in row r or row s, in sorted order.
     void row_union(int r, int s, vector<int> &rsc);
-    // set cdr to be the rows in column c or column d, in sorted order.
-    void col_union(int c, int d, vector<int> &cdr);
     
     // create a copy of row as the new last row, return the row number
     int push_row(const RowSparseInt &row);
-    int push_row(int r);
-    // throw away the last row
-    void pop_row();
     
-    // copy constructor
-    MatrixSparseInt(MatrixSparseInt&M,int MaxMRow);
-    MatrixSparseInt(IAResultImplementation *result_ptr) : result(result_ptr){}
+  public: // data
+    IAResultImplementation *result;
+    
+    // public so IncrementalIntervalAssignment methods can access and manipulate them directly for nullspace matrices, etc.
+    vector<RowSparseInt> rows;
+    vector< vector<int> > col_rows;
+    
+  protected:
+    
+    void print_map(const BlockingCols &amap) const;
+
+    // modify row (by row operations) so the coefficient of col < max_coeff
+    //   here r is the last row that gaussian elimination diagonalized
+    bool reduce_coefficient(int row, int col, int r, int max_coeff);
+
+    // return true if row has a blocking coefficient when trying to increment col,
+    // could modify to return the blocking cols
+    bool is_row_blocked(int row, int col, const BlockingCols &blocking_cols );
+    static
+    bool is_blocked(int v, pair<int,int> block); // true if v is outside (int,int) as an integer interval
+    
+    // true if the coefficients for column col are such that their gcd >= max_coeff
+    bool coefficient_irreducible(int col, int max_coeff);
+    
+    // unreduce c by row swaps and updating r; and remove c from all_blocking_cols
+    void unreduce(int &r, int c, BlockingCols &all_blocking_cols);
+    
+    // counts the number of columns blocking bounds, i.e. a positive and negative block adds 2 to the count
+    static
+    size_t blocking_size(BlockingCols &blocking_cols);
+    
+    // workhorse implementation
+    void matrix_row_us_minus_vr(const RowSparseInt &r_row, RowSparseInt &s_row, int s, vector< vector<int> > *col_rows_loc, int u, int v);
+    
+  private:
+    // re-used workspace for matrix_row_us_minus_vr
+    vector<int> new_cols, new_vals;
+    
   };
   struct EqualsB
   {
@@ -274,6 +261,8 @@ namespace IIA_Internal
     enum VarType {INT_VAR, EVEN_VAR, DUMMY_VAR, UNKNOWN_VAR};
     vector<VarType> col_type;
     
+    // == used by sub_problems only
+    
     IncrementalIntervalAssignment *parentProblem=nullptr;
     // the problem I'm a subproblem of
     
@@ -322,7 +311,6 @@ namespace IIA_Internal
     
     //- gather the solutions of the sub-problems into this problem
     void gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems );
-    void gather_solution( IncrementalIntervalAssignment* sub_problem );
     
     int solve_sub(bool do_improve);
     void copy_submatrix(vector <int> *rows, vector <int> *columns,
@@ -347,8 +335,9 @@ namespace IIA_Internal
     void print_row_iia(size_t r) const;
     void print_col_iia(size_t c) const;
     
-    // HNF Hermite Normal Form. Like RREF but using column operations. For solving initial constraints
-    // This is A.  AU = (B 0) for column operations U.
+    // Put matrix into HNF Hermite Normal Form.
+    //   Like RREF but using column operations. For solving initial constraints.
+    //   "this" is A.  AU = (B 0) for column operations U.
     bool HNF(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order);
     // use the HNF to solve Ax=b for x, i.e. satisfy the constraints but not the bounds
     bool HNF_satisfy_constraints(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order);
@@ -377,12 +366,13 @@ namespace IIA_Internal
     //   leading entry is positive and as small as possible
     // return the multiplier
     void row_simplify(int r);
+    
     // get the greatest common divisor of matrix entries in this column, using only rows r and following
     int gcd_col(int r, int c);
     
     // replace row s with some multiple of row s and row r,
     //   so that in row s the column c entry is zero.
-    void row_eliminate_column(int r, int s, int c);
+    // void row_eliminate_column(int r, int s, int c);
     // row[s] = u*s - v*r
     void row_us_minus_vr(int r, int s, int u, int v);
   
@@ -421,14 +411,9 @@ namespace IIA_Internal
                          vector<int>&cols_ind,
                          vector<int>&rows_dep);
     
-    // find all the rows containing the seed cols, then all the columns containing those rows
-    void relevant_rows_cols(const vector<int>&seed_cols,
-                            vector<int>&relevant_cols,
-                            vector<int>&relevant_rows);
-    
     // assign vars to their closest integer goal
-    // only assigns intVars columns
-    // if overwrite is false, then only variables who's value is 0 (uninitialized) are assigned.
+    //   only assigns INT_VARs
+    //   if overwrite is false, then only variables who's value is 0 (uninitialized) are assigned.
     void assign_vars_goals(bool overwrite);
     // assign the dummy variables the closest value that would make the constraints feasible
     // returns true if the assignment is feasible
@@ -440,10 +425,11 @@ namespace IIA_Internal
                                const vector<int>&rows_dep,
                                vector<int>&cols_fail);
     // return sum of coeff*solution - rhs
-    static
-    int row_sum(const vector<int>&cols, const vector<int>&coeff, const vector<int> &sol, int rhs);
-    int row_sum(const vector<int>&cols, const vector<int>&coeff, int rhs);
     int row_sum(int r);
+    int row_sum(const vector<int>&cols, const vector<int>&coeff, int rhs);
+    static
+    int row_sum(const vector<int>&cols, const vector<int>&coeff, const vector<int> &sol, int rhs); // implementation
+
     bool bounds_satisfied(vector<int>&cols_fail);
     
     // set M's rows to the nullspace basis vectors of this
@@ -462,9 +448,6 @@ namespace IIA_Internal
     // see if there is anything else we can do to improve the lexicographic solution, even if the max cannot be improved
     void fine_tune(MatrixSparseInt&M, MatrixSparseInt&N);
     
-    // create a copy of this problem into M
-    // bool copy_matrix(MatrixSparseInt&M, int MaxMrow);
-    
     //*** end: only works after we've called rref
     
     void identify_col_type();
@@ -481,10 +464,6 @@ namespace IIA_Internal
     void add_more_columns();
     void add_more_rows();
     
-    //- returns the index = column of the first variable/constraint, the rest are consecutive.
-    int add_variable  ( int num_variables );
-    int add_constraint( int num_constraints );
-
     // actually resize the vectors to number_of_rows and number_of_cols
     void resize_rows();
     void resize_cols();
@@ -573,7 +552,7 @@ namespace IIA_Internal
                  double threshold,
                  const vector<int> &qcol);
     
-  public:
+  protected:
     // priorities for selecting variables to change.
     friend class SetValuesFn;
     friend class SetValuesBounds;
@@ -639,6 +618,18 @@ namespace IIA_Internal
   {
     rows[row].cols.clear();
     rows[row].vals.clear();
+  }
+  
+  inline
+  int IncrementalIntervalAssignment::row_sum(const vector<int>&cols,const vector<int>&coeff, int rhs)
+  {
+    return row_sum(cols,coeff,col_solution,rhs);
+  }
+  
+  inline
+  int IncrementalIntervalAssignment::row_sum(int r)
+  {
+    return row_sum(rows[r].cols,rows[r].vals,rhs[r]);
   }
   
 } // namespace
