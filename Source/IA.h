@@ -109,9 +109,12 @@ namespace IIA
     // Instead, (equality) rows are added with slack variables whose current value is out of bounds.
     // To get everything in bounds, call solve.
     
-    // after solving, add some more rows. Returns the index of the first new row (col).
+    // after solving, add some more rows (or cols). Returns the index of the first new one.
     int new_row(int num_rows=1);
     int new_col(int num_cols=1);
+    // Remove a row by clearing it
+    //   otherwise, it is *not* OK to modify a row after solving and then resolve; create a new row instead.
+    void clear_row(int row);
 
     int get_solution(int col) const;
     const std::vector<int> &get_solution() const;

@@ -158,7 +158,7 @@ namespace IIA_Internal
     
     bool hasBeenSolved=false;
     int number_of_rows=0, used_row=-1, solved_used_row=-1;
-    int number_of_cols=0, used_col=-1;
+    int number_of_cols=0, used_col=-1, solved_used_col=-1;
     
     std::vector<int> col_lower_bounds, col_upper_bounds, col_solution;
     std::vector<double> goals;
@@ -171,7 +171,7 @@ namespace IIA_Internal
     std::vector<VarType> col_type;
     
     // names for debugging only. Usually these aren't assigned so incur minimal overhead
-    bool names_exist();
+    bool names_exist() const;
     std::vector<std::string> row_names, col_names;
     std::string problem_name;
     
@@ -234,8 +234,9 @@ namespace IIA_Internal
     int add_dummy_variable(int num_variables, bool is_sum_even );
     //- add one or more dummy variables to the LP. Before freeze_size.
     
+    //- return next unused variable, as a dummy variable or an interval variable
     int next_dummy();
-    //- return next unused dummy variable. Use after freeze_size.
+    int next_intvar();
     
   public:
     int parent_col(int c) {return parentCols[c];}
@@ -432,7 +433,14 @@ namespace IIA_Internal
     
     
   protected: 
+
+    void identify_col_type();
     
+    // convert inequalities to equalities
+    //   if re-solving, add slack variables so we start with an initial feasible soution
+    bool convert_inequalities();
+
+    // assign some values to variables before we truly solve
     void solution_init();
     
   public:
@@ -474,7 +482,6 @@ namespace IIA_Internal
     int get_is_solved() {return hasBeenSolved;}
     void set_is_unsolved() {hasBeenSolved=false;}
     
-    
     // keeps track of how many rows and columns we will allocate when we freeze size
     //- returns the index = column of the first variable/constraint, the rest are consecutive.
     int add_variable( int num_variables ); 
@@ -486,7 +493,7 @@ namespace IIA_Internal
     int num_rows() const {return number_of_rows;}
     int num_cols() const {return number_of_cols;}
     
-    // used by callers only,
+    int   get_M_unsorted( int row, int col );
     int   get_M( int row, int col );  // caution: relies on entries being sorted, be careful when we allow queries
     void  get_M( int row, const std::vector<int> *&cols, const std::vector<int> *&vals );
     void  set_M( int row, int col, int val ); // doesn't rely on entries being sorted, may be slow
@@ -835,6 +842,20 @@ namespace IIA_Internal
   {
     goals[c]=0.; // flag that the goal should be ignored
   }
+  
+  inline
+  int IncrementalIntervalAssignment::get_M  ( int row, int col )
+  {
+    return rows[row].get_val(col);
+  }
+  
+  inline
+  void IncrementalIntervalAssignment::get_M( int row, const std::vector<int> *&cols, const std::vector<int> *&vals )
+  {
+    cols = &rows[row].cols;
+    vals = &rows[row].vals;
+  }
+
   
 } // namespace
 

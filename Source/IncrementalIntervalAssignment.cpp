@@ -13,25 +13,24 @@
 //  x CUBIT_TRUE, CUBIT_FALSE to true and false
 //  x GE etc to GE, etc
 //  x CUBIT_FAILURE, CUBIT_SUCCESS to bool
-//   data layout for variables with goals and slack variables and sum-even vars... probably fast enough we can just go over all of them and check the goals. maybe need something to mark vars whose column coefficients are 2
-//      gather and save as set at beginning of problem. Caller might have defined dummy variables, etc.
+//  x  data layout for variables with goals and slack variables and sum-even vars... probably fast enough we can just go over all of them and check the goals. maybe need something to mark vars whose column coefficients are 2
+//  x    gather and save as set at beginning of problem. Caller might have defined dummy variables, etc.
+//  x auto determine variable type
 //  x sum-even constraint conversion
 //   method to copy a problem, not the solution
-//   auto determine variable type
-//    fill in new_col
+//  x  fill in new_col
 //  x initialize goals to 1, bounds to 1,inf, etc.
-//   int new_row(MRow &Mrow);  convert from MRow to our sparse format
+//  x-skipped int new_row(MRow &Mrow);  convert from MRow to our sparse format
 //  x PRINT_INFO, print_flag, put in log instead
 //  x verify_full_solution, get rid of refentities
 //   IA::solve_feasible, skip improvement phase
-//   get rid of names?! or convert
-//   figure out when to sort rows, perhaps a flag as to whether they've been sorted or not
+//  x-skipped, leave it for debugging get rid of names?! or convert
+//  x figure out when to sort rows, perhaps a flag as to whether they've been sorted or not
 //   figure out when to reset the solved flag,
-//   remove the extra +1 in the col and row indices when recursively_add_add
 //   use a tool to determine code that isn't used and delete it
-//   fill in public interface methods
-//   get rid of compiler warnings, sign comparision and losing precision, etc.
-//   auto resizing
+//  x fill in public interface methods
+//  x get rid of compiler warnings, sign comparision and losing precision, etc.
+//  x auto resizing
 //   fill in test.cpp
 //   test functions
 //   get rid of the +1 indexing when subdividing the problem.  check for inefficient array searches
@@ -42,6 +41,7 @@
 //   cmake
 //   test on a few compilers
 
+//  paperwork to release it
 
 // math utilities
 namespace IIA_Internal
@@ -55,7 +55,7 @@ namespace IIA_Internal
   using IIA::FREE;
   using IIA::BAD;
   
-  bool IncrementalIntervalAssignment::names_exist()
+  bool IncrementalIntervalAssignment::names_exist() const
   {return false;}
   
   // greatest common divisor of u and v
@@ -5142,10 +5142,23 @@ namespace IIA_Internal
     {
       add_more_columns();
     }
+    // change if from an INT_VAR to a DUMMY_VAR
     col_type[used_col]=DUMMY_VAR;
+    goals[used_col]=0;
+    col_lower_bounds[used_col] = std::numeric_limits<int>::lowest();
+    col_upper_bounds[used_col] = std::numeric_limits<int>::max();
     return used_col;
   }
-  
+
+  int IncrementalIntervalAssignment::next_intvar()
+  {
+    if (++used_col >= number_of_cols)
+    {
+      add_more_columns();
+    }
+    return used_col;
+  }
+
   void IncrementalIntervalAssignment::count_used_rows_cols()
   {
     int max_r = -1, max_c = -1;
@@ -5193,6 +5206,10 @@ namespace IIA_Internal
     {
       col_names.resize(number_of_cols);
     }
+    
+    // skip tied variables
+    // we only resize_cols on parent problems, and only allocate tied_variables on sub_problems
+
   }
   
   void IncrementalIntervalAssignment::add_more_rows()
@@ -5206,37 +5223,7 @@ namespace IIA_Internal
   {
     number_of_cols = (number_of_cols * 3) / 2 + 8;
     resize_cols();
-    
-    // we only add_more_columns on parent problems, and only allocate tied_variables on sub_problems
-    //  if (!tied_variables.empty() || old_cols==0)
-    //  {
-    //    tied_variables.resize(number_of_cols);
-    //  }
   }
-  
-  //int IncrementalIntervalAssignment::set_row_is_sum_even(int row, MRefEntity *mref_entity, int dummy_coeff, int dummy_bound)
-  //{
-  //  // comes in as -sum_v + dummy_coeff * D = rhs, or dummy_coeff * D = rhs + sum_v
-  //  // where dummy variable D>=dummy_bound
-  //
-  //  int dummy_variable=next_dummy();
-  //  col_lower_bounds[dummy_variable] = dummy_bound;
-  //
-  //  auto &mrow=rows[row];
-  //  mrow.cols.push_back(dummy_variable);
-  //  mrow.vals.push_back(dummy_coeff);
-  //
-  //  if (names_exist())
-  //  {
-  //    std::string variable_name = string_format("%s_sum_even_var/%d",
-  //                                               mref_entity->ref_entity()->class_id().c_str(),
-  //                                               dummy_coeff );
-  //    set_col_name(dummy_variable, variable_name.c_str());
-  //  }
-  //
-  //  return dummy_variable;
-  //}
-  //
   
   int IncrementalIntervalAssignment::new_row(int num_rows)
   {
@@ -5257,21 +5244,24 @@ namespace IIA_Internal
   
   int IncrementalIntervalAssignment::new_col(int num_cols)
   {
-    assert(0);
-    return -1;
+    // dynamically update in a way that we can continue solving where we left off
+    if (num_cols<1)
+      return -1;
+    
+    int return_col = used_col+1;
+    used_col += num_cols;
+    
+    // add more rows if needed
+    if (used_col>=(int)col_rows.size())
+    {
+      add_more_columns();
+    }
+    return return_col;
   }
 
   
   void IncrementalIntervalAssignment::freeze_problem_size()
   {
-    // zzyk to do: ensure we are told how many there are going to be
-    // reserve extra space for dynamic u-sub variables and rows
-    
-    // add a dummy variable for inequality rows
-    // zzyk to do: ensure we are told how many there are going to be
-    // for now, allocate space for one dummy per row
-    // add_dummy_variable(number_of_rows, false);
-    
     resize_rows();
     resize_cols();
   }
@@ -5410,14 +5400,15 @@ namespace IIA_Internal
       return vals[ found_col-cols.begin() ];
     return 0;
   }
-  int IncrementalIntervalAssignment::get_M  ( int row, int col )
+  int IncrementalIntervalAssignment::get_M_unsorted  ( int row, int col )
   {
-    return rows[row].get_val(col);
-  }
-  void IncrementalIntervalAssignment::get_M( int row, const std::vector<int> *&cols, const std::vector<int> *&vals )
-  {
-    cols = &rows[row].cols;
-    vals = &rows[row].vals;
+    auto &r = rows[row];
+    for (size_t i = 0; i < r.cols.size(); ++i)
+    {
+      if (r.cols[i]==col)
+        return r.vals[i];
+    }
+    return 0;
   }
   
   void IncrementalIntervalAssignment::set_M( int row, int col, int val )
@@ -5467,8 +5458,11 @@ namespace IIA_Internal
     rows[row].cols.swap(cols);
     rows[row].vals.swap(vals);
     // not sorted yet
+    // columns not filled in yet
   }
   
+  void clear_row(int row);
+
   
   void IncrementalIntervalAssignment::set_problem_name( const char *name )
   {
@@ -5767,27 +5761,208 @@ namespace IIA_Internal
     return true;
   }
 
+  void IncrementalIntervalAssignment::identify_col_type()
+  {
+    for (int c = 0; c < used_col; ++c)
+    {
+      // INT_VARS have a goal, and usually a positive lower bound
+      // DUMMY_VARS have no goal, and arbitrary bounds
+      if (goals[c]==0)
+      {
+        col_type[c]=DUMMY_VAR;
+        // EVEN_VARS have a coefficient of 2 in a single row
+        if (col_rows[c].size()==1)
+        {
+          auto v = get_M(col_rows[c][0],c);
+          if (abs(v) % 2 == 0)
+          {
+            col_type[c]=EVEN_VAR;
+          }
+        }
+      }
+      else
+      {
+        col_type[c]=INT_VAR;
+      }
+    }
+  }
+
   void IncrementalIntervalAssignment::force_satisfied_with_slack(int r)
   {
+    // already satisfied?
+    if (row_sum(r)==0)
+      return;
+
     auto &row = rows[r];
+    
+    // Is there already a slack variable we can use?
+    //   E.g. the user may have already included one.
+    for (size_t i = 0; i < row.cols.size(); ++i)
+    {
+      const auto c = row.cols[i];
+      if (col_rows[c].size()==1) // require var is in single row so that we know we aren't making some other row unsatisfied
+      {
+        auto old_solution = col_solution[c];
+        col_solution[c]=0;
+        auto sum = row_sum(r);
+        auto v = row.vals[i];
+        if (sum % v==0)
+        {
+          col_solution[c] = -sum / v;
+          assert( row_sum(r) == 0);
+          return; // success
+        }
+        else
+        {
+          // restore solution, keep looking
+          col_solution[c]=old_solution;
+        }
+      }
+    }
+    
+    // Need to make a new slack variable
     int slack_var = next_dummy();
     row.cols.push_back(slack_var);
     row.vals.push_back(-1);
     col_rows[slack_var].push_back(r);
+    col_type[slack_var] = DUMMY_VAR;
+    goals[slack_var]=0.;
     
     // slack_var will start out of bounds, then we optimize to put it into bounds
     col_lower_bounds[slack_var]=0;
     col_upper_bounds[slack_var]=0;
-    int slack = row_sum(r);
-    col_solution[slack_var]=slack;
-    assert( row_sum(r) == 0);
     
     if (names_exist())
     {
-      col_names[slack_var]="slack_row_" + std::to_string(used_row);
+      col_names[slack_var]="slack_" + std::to_string(slack_var) + "_row_" + std::to_string(r);
     }
+    
+    // assign slack variable a value
+    int slack = row_sum(r);
+    col_solution[slack_var]=slack;
+    assert( row_sum(r) == 0);
   }
 
+  bool IncrementalIntervalAssignment::convert_inequalities()
+  {
+    auto old_used_col = used_col;
+    
+    // convert inequalities into equalities with dummy variables
+    int num_even=0, num_ineq=0, num_eq=0, num_new=0;
+    const bool is_re_solving = solved_used_row>=0;
+    for (int r = std::max(0,solved_used_row); r <= used_row; ++r)
+    {
+      const bool row_is_new = (is_re_solving && r>solved_used_row);
+      if (row_is_new)
+        ++num_new;
+      
+      const auto con=constraint[r];
+      if (con == EVEN)
+      {
+        // convert constraint
+        auto c = next_dummy();
+        col_type[c]=EVEN_VAR;
+        goals[c]=0.;
+        rows[r].cols.push_back(c);
+        rows[r].vals.push_back(-2);
+        col_rows[c].push_back(r);
+        col_lower_bounds[c]=2;
+        // no upper bound
+        
+        constraint[r]=EQ;
+        
+        if (names_exist())
+        {
+          col_names[c]="sum_even_row_" + std::to_string(r);
+        }
+        ++num_even;
+        
+        if (row_is_new)
+        {
+          int slack = row_sum(r);
+          col_solution[c]=slack/2;
+          if (row_sum(r)!=0)
+          {
+            // add *second* dummy to make it satisfied
+            force_satisfied_with_slack(r);
+          }
+        }
+      }
+      else if (con==LE || con==GE)
+      {
+        // convert constraint
+        auto c = next_dummy();
+        col_type[c] = DUMMY_VAR;
+        goals[c]=0.;
+        rows[r].cols.push_back(c);
+        const int c_coeff = (con==LE ? 1 : -1);
+        rows[r].vals.push_back(c_coeff);
+        col_rows[c].push_back(r);
+        col_lower_bounds[c]=0;
+        // no upper bound
+        
+        constraint[r]=EQ;
+        
+        if (names_exist())
+        {
+          col_names[c]="inequality_freedom_row_" + std::to_string(r);
+        }
+        ++num_ineq;
+        
+        if (row_is_new)
+        {
+          int slack = row_sum(r);
+          col_solution[c] = -c_coeff * slack;
+          assert( row_sum(r) == 0);
+        }
+        
+      }
+      else if (row_is_new && con==EQ)
+      {
+        ++num_eq;
+        // for new eq constraints, introduce a slack variable so we start with an initial feasible solution.
+        force_satisfied_with_slack(r);
+      }
+    }
+    
+    // debug
+    if (result->log_debug)
+    {
+      if (num_new)
+      {
+        result->debug_message("%d new constraints.\n",num_new);
+      }
+      if (num_even)
+      {
+        result->debug_message("%d sum-even constraints converted to equalities with dummy variables.\n",num_even);
+      }
+      if (num_ineq)
+      {
+        result->debug_message("%d inequality constraints converted to equalities with dummy variables.\n",num_ineq);
+      }
+      if (num_eq)
+      {
+        result->debug_message("%d new equality constraints satisfied.\n",num_ineq);
+      }
+      const auto num_slack = used_col-old_used_col;
+      if (num_slack)
+      {
+        result->debug_message("%d dummy (slack) variables introduced.\n",num_slack);
+      }
+      if (num_even || num_ineq || num_eq)
+      {
+        print_problem("full problem initial after inequality conversion");
+      }
+      else
+      {
+        result->debug_message("No inequalities or even constraints, no new equalities to satisfy, nothing to convert.\n");
+      }
+    }
+    // debug
+    
+    return (num_even || num_ineq || num_eq);
+  }
+  
   bool IncrementalIntervalAssignment::solve(bool first_time, int scheme_flag)
   {
     result->info_message("Running incremental interval assignment.\n");
@@ -5807,83 +5982,14 @@ namespace IIA_Internal
     
     count_used_rows_cols();
     
-    // convert inequalities into equalities with dummy variables
-    int num_converted=0;
-    for (int r = std::max(0,solved_used_row); r <= used_row; ++r)
-    {
-      const bool row_is_new = (solved_used_row>=0 && r>solved_used_row);
-      const auto con=constraint[r];
-      if (con == EVEN)
-      {
-        // convert constraint
-        auto c = next_dummy();
-        col_type[c]=EVEN_VAR;
-        rows[r].cols.push_back(c);
-        rows[r].vals.push_back(-2);
-        col_lower_bounds[c]=2;
-        // no upper bound
-        
-        // constraint[r] is now EQ;
-        // change it so if we call this again then we don't re-add variables
-        constraint[r]=EQ;
-        
-        if (names_exist())
-        {
-          col_names[c]="sum_even_row_" + std::to_string(r);
-        }
-        ++num_converted;
-        
-        if (row_is_new)
-        {
-          int slack = row_sum(r);
-          col_solution[c]=slack/2;
-          if (row_sum(r)!=0)
-          {
-            // add *second* dummy to make it satisfied
-            force_satisfied_with_slack(r);
-          }
-        }
-      }
-      else if (con==LE || con==GE)
-      {
-        // convert constraint
-        auto c = next_dummy();
-        rows[r].cols.push_back(c);
-        // col_rows[c].push_back(r); // done by fill_in_cols_from_rows
-        const int c_coeff = (con==LE ? 1 : -1);
-        rows[r].vals.push_back(c_coeff);
-        col_lower_bounds[c]=0;
-        // no upper bound
-        
-        // constraint[r] is now EQ;
-        // change it so if we call this again then we don't re-add variables
-        constraint[r]=EQ;
-        
-        if (names_exist())
-        {
-          col_names[c]="inequality_freedom_row_" + std::to_string(r);
-        }
-        ++num_converted;
-        
-        if (row_is_new)
-        {
-          int slack = row_sum(r);
-          col_solution[c]=-c_coeff * slack;
-          assert( row_sum(r) == 0);
-        }
-
-      }
-      else if (row_is_new && con==EQ)
-      {
-        // for new eq constraints, introduce a slack variable so we start with an initial feasible solution.
-        force_satisfied_with_slack(r);
-      }
-    }
-
     // sort rows, fill in columns
     const auto new_row_start=std::max(0,solved_used_row+1);
     sort_rows(new_row_start);
-    fill_in_cols_from_rows(); // could be more efficient about this
+    fill_in_cols_from_rows(); // could be more efficient about this the second time we are solving
+
+    identify_col_type();
+    
+    convert_inequalities();
 
     if (solved_used_row<0)
       first_time=true;
@@ -5898,8 +6004,6 @@ namespace IIA_Internal
     {
       // don't init solution, don't adjust tied variables
       should_adjust_solution_tied_variables = false;
-
-      
       
       // debug
       if (result->log_debug)
@@ -5922,20 +6026,6 @@ namespace IIA_Internal
       
     } // !first_time
     
-    // debug
-    if (result->log_debug)
-    {
-      if (num_converted)
-      {
-        result->debug_message("%d inequalities/sum-even converted to equalities with dummy variables\n",num_converted);
-        print_problem("full problem initial after inequality conversion");
-      }
-      else
-      {
-        result->debug_message("No inequalities; nothing to convert\n");
-      }
-    }
-    // debug
 
     if (result->log_debug)
     {

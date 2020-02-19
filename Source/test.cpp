@@ -60,6 +60,7 @@ void test_result(IIA::IA &ia)
 
 void test_solution(IIA::IA &ia, std::vector<int> expected_solution)
 {
+  bool discrepancy = false;
   for (int i=0; i < expected_solution.size(); ++i)
   {
     const auto actual = ia.get_solution(i);
@@ -67,7 +68,20 @@ void test_solution(IIA::IA &ia, std::vector<int> expected_solution)
     if (actual != expected)
     {
       std::cout << "solution x[" << i << "] = " << actual << ", NOT " << expected << " as expected." << std::endl;
+      discrepancy=true;
     }
+  }
+  if (discrepancy)
+  {
+    std::cout << "solution we found =";
+    for (auto s : ia.get_solution())
+      std::cout << " " << s;
+    std::cout << std::endl;
+    std::cout << "solution expected =";
+    for (auto s : expected_solution)
+      std::cout << " " << s;
+    std::cout << std::endl;
+
   }
 }
 
@@ -115,7 +129,6 @@ void test_problem_A()
   ia.set_row(0,cols,vals);
   ia.set_goal(0,1);
   ia.set_goal(1,4);
-  ia.set_goal(1,4);
   ia.solve();
   
   test_result(ia);
@@ -123,6 +136,40 @@ void test_problem_A()
   test_solution(ia,expected_solution);
   
   std::cout << "test_problem_A end." << std::endl;
+}
+
+
+void test_problem_AA()
+{
+  // dynamic sizing
+  // test solving a single equality constraint with goals
+  // x0 - x1 = 0
+  // g[0]=1
+  // g[1]=4
+  // expect solution [2,2]
+  std::cout << "test_problem_AA start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  
+  // ia.resize(1,2);
+  std::vector<int> vals = {1, -1};
+  std::vector<double> goals = {1, 4};
+  int r = ia.next_row();
+  for (int i = 0; i < vals.size(); ++i)
+  {
+    int c = ia.next_col();
+    ia.set_row_col(r,c,vals[i]);
+    ia.set_goal(c,goals[i]);
+  }
+
+  ia.solve();
+  
+  test_result(ia);
+  std::vector<int> expected_solution = {2,2};
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_AA end." << std::endl;
 }
 
 void test_problem_B()
@@ -157,6 +204,74 @@ void test_problem_B()
   
   std::cout << "test_problem_B end." << std::endl;
 }
+
+void test_problem_BB()
+{
+  // test solving a single sum-even with goals, but using IIA::EVEN
+  // x0 + x1 + x2 = Even
+  // g[0]=1
+  // g[1]=3
+  // g[2]=5
+  // expect solution [1,3,6]
+  std::cout << "test_problem_BB start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  
+  ia.resize(1,3);
+  std::vector<int> cols = {0, 1, 2};
+  std::vector<int> vals = {1, 1, 1};
+  ia.set_row(0,cols,vals);
+  ia.set_goal(0,1);
+  ia.set_goal(1,3);
+  ia.set_goal(2,5);
+  ia.set_constraint(0, IIA::EVEN);
+  
+  ia.solve();
+  
+  test_result(ia);
+  std::vector<int> expected_solution = {1,3,6,5};
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_BB end." << std::endl;
+}
+
+
+void test_problem_BC()
+{
+  // dynamic sizing
+  // test solving a single sum-even with goals, but using IIA::EVEN
+  // x0 + x1 + x2 = Even
+  // g[0]=1
+  // g[1]=3
+  // g[2]=5
+  // expect solution [1,3,6]
+  std::cout << "test_problem_BC start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  
+  std::vector<int> cols = {0, 1, 2};
+  std::vector<int> vals = {1, 1, 1};
+  std::vector<double> goals = {1, 3, 5};
+  int r = ia.next_row();
+  ia.set_constraint(r, IIA::EVEN);
+  for (int i = 0; i < vals.size(); ++i)
+  {
+    int c = ia.next_col();
+    ia.set_row_col(r,c,vals[i]);
+    ia.set_goal(c,goals[i]);
+  }
+
+  ia.solve();
+  
+  test_result(ia);
+  std::vector<int> expected_solution = {1,3,6,5};
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_BC end." << std::endl;
+}
+
 
 
 void test_problem_C()
@@ -361,6 +476,159 @@ void test_problem_E()
 }
 
 
+void test_problem_F()
+{
+  // U submap test with resolving.
+  // 0 opposite 2,4,6
+  // alternating 1,3,5,7
+  std::cout << "test_problem_F start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  
+  ia.resize(2,8);
+  {
+    std::vector<int> cols = { 0, 2, 4, 6};
+    std::vector<int> vals = {-1, 1, 1, 1};
+    ia.set_row(0, cols, vals);
+  }
+  {
+    std::vector<int> cols = { 1, 3,  5, 7};
+    std::vector<int> vals = {-1, 1, -1, 1};
+    ia.set_row(1, cols, vals);
+  }
+  ia.set_goal(0,6);
+  ia.set_goal(2,2);
+  ia.set_goal(4,2);
+  ia.set_goal(6,2);
+  
+  ia.set_goal(1,4);
+  ia.set_goal(3,7);
+  ia.set_goal(5,8);
+  ia.set_goal(7,4);
+  
+  
+  ia.solve();
+
+  test_result(ia);
+  
+  if (ia.is_solved() && !ia.get_result()->error)
+  {
+    {
+      // std::vector<int> expected_solution = {6,4,2,8,2,8,2,4};
+      std::vector<int> expected_solution = {6,4,2,7,2,7,2,4};
+      test_solution(ia,expected_solution);
+    }
+    
+    // expect this to occur once
+    // if x3 >= x1
+    if (ia.get_solution(3) >= ia.get_solution(1))
+    {
+      // add constraint x3 < x1  <==>  -x1 + x3 < 0   <==>   -x1 + x3 <= -1
+      auto r = ia.new_row();
+      std::vector<int> cols = { 1, 3};
+      std::vector<int> vals = {-1, 1};
+      ia.set_row(r, cols, vals);
+      ia.set_rhs(r,-1);
+      ia.set_constraint(r, IIA::LE);
+      
+      ia.solve(); // re-solve
+      
+      test_result(ia);
+
+      std::vector<int> expected_solution = {6,6,2,5,2,5,2,6};
+      test_solution(ia,expected_solution);
+    }
+  }
+  
+  std::cout << "test_problem_F end." << std::endl;
+}
+
+void test_problem_G()
+{
+  // U submap test with resolving. multiple legs
+  // 0 opposite 2,4,6,8,10,12,14
+  // alternating 1,3,5,7,9,11,13,15
+  std::cout << "test_problem_G start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  
+  // ia.get_result()->log_info=true;
+  // ia.get_result()->log_debug=true;
+  
+  ia.resize(2,16);
+  {
+    std::vector<int> cols = { 0, 2, 4, 6, 8, 10, 12, 14};
+    std::vector<int> vals = {-1, 1, 1, 1, 1,  1,  1,  1};
+    ia.set_row(0, cols, vals);
+  }
+  std::vector<int> cren_cols = { 1, 3,  5, 7,  9, 11, 13, 15};
+  std::vector<int> cren_vals = {-1, 1, -1, 1, -1,  1, -1,  1};
+  {
+    std::vector <int> cols = cren_cols;
+    std::vector <int> vals = cren_vals;
+    ia.set_row(1, cols, vals);
+  }
+
+  ia.set_goal(0,6);
+  ia.set_goal(2,2);
+  ia.set_goal(4,2);
+  ia.set_goal(6,2);
+  ia.set_goal(8,2);
+  ia.set_goal(10,2);
+  ia.set_goal(12,2);
+  ia.set_goal(14,2);
+
+  // increasing
+  ia.set_goal(1,  2);
+  ia.set_goal(3,  4);
+  ia.set_goal(5,  6);
+  ia.set_goal(7,  8);
+  ia.set_goal(9, 10);
+  ia.set_goal(11,16);
+  ia.set_goal(13,22);
+  ia.set_goal(15, 1);
+  
+  int iter=0;
+  bool resolve=true;
+  while (resolve)
+  {
+    ia.solve();
+    resolve=false;
+    
+    test_result(ia);
+    
+    if (iter++ < 5 && ia.is_solved() && !ia.get_result()->error)
+    {
+      int sum = 0;
+      for (size_t i=0; i<cren_cols.size()-1; ++i)
+      {
+        sum += cren_vals[i]*ia.get_solution(cren_cols[i]);
+        if (sum >= 0)
+        {
+          auto r = ia.new_row();
+          int v = 1;
+          for (size_t j = 0; j <= i; ++j)
+          {
+            ia.set_row_col(r, cren_cols[j], v);
+            v = -v;
+          }
+          ia.set_rhs(r,1);
+          ia.set_constraint(r, IIA::GE);
+          resolve=true;
+          break;
+        }
+      }
+    }
+  }
+
+  std::vector<int> expected_solution = {12, 3, 1, 2, 1, 7, 2, 7, 2, 13, 2, 13, 2, 4, 2, 5};
+  shuffle_solution(ia,expected_solution, {2,4,6,8,10,12,14} );
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_G end." << std::endl;
+}
 
 namespace IIA_Internal
 {
@@ -636,6 +904,7 @@ namespace IIA_Internal
     
     bool rref_OK1 = IIA0.test_rref_constraints();
     
+    result.log_warning = false;
     if (result.log_warning)
     {
       std::cout << "\nThe problem coefficients are designed to have no integer solution."
@@ -647,6 +916,7 @@ namespace IIA_Internal
       std::cout << "ERROR: This problem has no solution but the solver thought it found one!\n";
     }
     
+    result.log_warning = true;
     bool rref_OK2 = IIA0.test_rref_improve();
     
     std::cout << "IIATester:test_problem3 end." << std::endl;
@@ -666,9 +936,15 @@ int main(int argc, const char * argv[])
   
   // test solving some interval assignment problem
   test_problem_A();
+  test_problem_AA();
   test_problem_B();
+  test_problem_BB();
+  test_problem_BC();
   test_problem_C();
   test_problem_D();
   test_problem_E();
   
+  test_problem_F();
+  test_problem_G();
+
 }

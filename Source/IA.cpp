@@ -86,7 +86,7 @@ namespace IIA
   }
   int IA::next_col()
   {
-    return ia->next_dummy();
+    return ia->next_intvar();
   }
   int IA::new_row(int num_rows)
   {
@@ -161,7 +161,7 @@ namespace IIA
   }
   int IA::get_row_col(int row, int col) const
   {
-    return ia->get_M(row,col);
+    return ia->get_M_unsorted(row,col);
   }
   ConstraintType IA::get_constraint(int row) const
   {
