@@ -32,7 +32,9 @@ namespace IIA
     // A is a matrix, x,b,lo,hi,g are vectors.
     
     IA();
-    virtual ~IA();
+    IA(IA &copy_me);
+    void copy_me(IA &target);
+    virtual ~IA();    
     
     //== space for problem
     void clear();

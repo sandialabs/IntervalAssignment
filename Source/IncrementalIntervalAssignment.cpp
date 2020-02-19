@@ -24,12 +24,17 @@
 //  x-skipped int new_row(MRow &Mrow);  convert from MRow to our sparse format
 //  x PRINT_INFO, print_flag, put in log instead
 //  x verify_full_solution, get rid of refentities
-//  x-skipped, leave it for debugging get rid of names?! or convert
+//  x get rid of names
 //  x figure out when to sort rows, perhaps a flag as to whether they've been sorted or not
 //  x clean up Queue friend issues
-//   method to copy a problem, not the solution
-//  x IA::solve_feasible, skip improvement phase
+//  x method to copy a problem
+//       test it
+//   changing a row invalidates the old solution
 //   figure out when to reset the solved flag,
+//   callable method to invalidate old solution
+//        test invalidating the old solution, and resolving
+//  x-get rid of names ( caller can keep track of that if needed)
+//  x IA::solve_feasible, skip improvement phase
 //   use a tool to determine code that isn't used and delete it
 //  x fill in public interface methods
 //  x get rid of compiler warnings, sign comparision and losing precision, etc.
@@ -37,8 +42,8 @@
 //   fill in test.cpp
 //  x get rid of the +1 indexing when subdividing the problem.  check for inefficient array searches
 //   beautify output
-//   collect public, private methods of IncrementalIntervalAssignment in header file
-//   organize like methods
+//  x collect public, private methods of IncrementalIntervalAssignment in header file
+//  x organize like methods
 //  x combine solve_map and solve_even into one function
 //  x vector -> using vector,  vector
 //   cmake
@@ -70,9 +75,6 @@ namespace IIA_Internal
   using std::lower_bound;
   using std::back_inserter;
 
-  bool IncrementalIntervalAssignment::names_exist() const
-  {return false;}
-  
   // greatest common divisor of u and v
   // always returns a positive number, as we take abs of u and v
   int gcd(int u, int v)
@@ -370,17 +372,14 @@ namespace IIA_Internal
         }
       }
       result->info_message("%d variables were removed and tied to %d variables\n", num_tied, num_tied_to);
-      if (result->log_debug)
+      for (int c=0; (size_t) c<tied_variables.size(); ++c)
       {
-        for (int c=0; (size_t) c<tied_variables.size(); ++c)
+        result->info_message("%d tied :",c);
+        for (auto c2 : tied_variables[c])
         {
-          result->info_message("%d tied :",c);
-          for (auto c2 : tied_variables[c])
-          {
-            result->info_message(" %d",c2);
-          }
-          result->info_message("\n");
+          result->info_message(" %d",c2);
         }
+        result->info_message("\n");
       }
     }
     // debug
@@ -473,10 +472,7 @@ namespace IIA_Internal
         {
           if (old_val != col_solution[c])
           {
-            result->debug_message("MasterTie x%d ", c);
-            if (names_exist())
-              result->debug_message("%s", col_names[c].c_str());
-            result->debug_message(" adjusted from %d to %d\n", old_val, col_solution[c]);
+            result->debug_message("MasterTie x%d adjusted from %d to %d\n", c, old_val, col_solution[c]);
           }
         }
         // debug
@@ -621,7 +617,8 @@ namespace IIA_Internal
           {
             rc=true;
             result->info_message("Interval matching row %d has no integer solution, problem is infeasible.\n",r);
-            print_row_iia(r);
+            if (result->log_debug)
+              print_row_iia(r);
           }
           else
             return true;
@@ -640,11 +637,7 @@ namespace IIA_Internal
             {
               rc=true;
               result->info_message("Interval matching row %d, its only solution is below the variable lower bound, problem is infeasible.\n",r);
-              if (names_exist())
-                result->info_message("x%d %s ", c, col_names[c].c_str());
-              else
-                result->info_message("x%d ", c);
-              result->info_message("only has solution %d < %d lower bound.\n",s, col_lower_bounds[c]);
+              result->info_message("x%d only has solution %d < %d lower bound.\n", c, s, col_lower_bounds[c]);
             }
             else
               return true;
@@ -656,11 +649,7 @@ namespace IIA_Internal
             {
               rc=true;
               result->info_message("Interval matching row %d, its only solution is above the variable upper bound, problem is infeasible.\n",r);
-              if (names_exist())
-                result->info_message("x%d %s ", c, col_names[c].c_str());
-              else
-                result->info_message("x%d ", c);
-              result->info_message("only has solution %d > %d upper bound",s, col_upper_bounds[c]);
+              result->info_message("x%d only has solution %d > %d upper bound", c, s, col_upper_bounds[c]);
             }
             else
               return true;
@@ -706,7 +695,7 @@ namespace IIA_Internal
             {
               rc=true;
               result->info_message("Interval matching row %d sum must be <= %d, but smallest possible sum is %d; problem is infeasible.\n", r, b, sum);
-              if (names_exist() || result->log_debug)
+              if (result->log_debug)
                 print_row_iia(r);
             }
             else
@@ -727,7 +716,7 @@ namespace IIA_Internal
               m = col_upper_bounds[c];
               if (m==numeric_limits<int>::max())
               {
-                sum = numeric_limits<int>::max(); // sum is unbounded below
+                sum = numeric_limits<int>::max(); // sum is unbounded above
                 break;
               }
             }
@@ -737,7 +726,7 @@ namespace IIA_Internal
               m = col_lower_bounds[c];
               if (m==numeric_limits<int>::lowest())
               {
-                sum = numeric_limits<int>::max(); // sum is unbounded below
+                sum = numeric_limits<int>::max(); // sum is unbounded above
                 break;
               }
             }
@@ -748,8 +737,8 @@ namespace IIA_Internal
             if (result->log_info || result->log_debug)
             {
               rc=true;
-              result->info_message("Interval matching row %d sum must be >= %d, but smallest possible sum is %d; problem is infeasible.\n", r, b, sum);
-              if (names_exist() || result->log_debug)
+              result->info_message("Interval matching row %d sum must be >= %d, but largest possible sum is %d; problem is infeasible.\n", r, b, sum);
+              if (result->log_debug)
                 print_row_iia(r);
             }
             else
@@ -1026,9 +1015,11 @@ namespace IIA_Internal
                 {
                   // debug
                   // result->error_message("Found a case where unbounded works!\n");
-                  result->debug_message("row %d unbounded ",(int)m);
                   if (result->log_debug)
+                  {
+                    result->debug_message("row %d unbounded ",(int)m);
                     row.print_row(result);
+                  }
                   // debug
                   
                   // accept_strict_improvement is overkill and inefficient in this case, but it works
@@ -1169,7 +1160,6 @@ namespace IIA_Internal
                   if (result->log_debug)
                   {
                     result->debug_message("  Giving up! Gaussian elimination failed.\n");
-                    if (result->log_debug)
                     {
                       result->info_message("MB2 r=%d reduced rows\n",r);
                       MB2.print_matrix("MB2");
@@ -1495,10 +1485,8 @@ namespace IIA_Internal
       result->debug_message("Accepted increment of x%d from %d to %d via %d * ",
                             tc, col_solution[tc] - total_dx * mrow.vals[ti], col_solution[tc], total_dx);
       mrow.print_row(result);
-      if (result->log_debug)
-        print_solution("after accepted increment");
-      else
-        print_solution_summary("after accepted increment");
+      print_solution("after accepted increment");
+      // print_solution_summary("after accepted increment");
     }
     
     // update improved_cols
@@ -1798,7 +1786,6 @@ namespace IIA_Internal
                 if (result->log_debug)
                 {
                   result->debug_message("  Giving up! Gaussian elimination failed.\n");
-                  if (result->log_debug)
                   {
                     result->info_message("MV2 r=%d reduced rows\n",r);
                     MV2.print_matrix("MV2");
@@ -1942,7 +1929,7 @@ namespace IIA_Internal
     //  {
     //    result->info_message("Nullspace after done adding rows to improve solution: \n");
     //    M.print_matrix();
-    //    print_solution("improved solution"); // for col_names
+    //    print_solution("improved solution");
     //  }
     // debug
     
@@ -1950,10 +1937,8 @@ namespace IIA_Internal
     if (result->log_debug)
     {
       result->debug_message("IIA goal Q empty.\n");
-      if (result->log_debug)
-        print_solution("improved solution");
-      else
-        print_solution_summary("improved solution");
+      print_solution("improved solution");
+      // print_solution_summary("improved solution");
     }
     // debug
     
@@ -2609,10 +2594,8 @@ namespace IIA_Internal
     // debug
     if (result->log_debug)
     {
-      if (result->log_debug)
-        print_matrix("Starting Gaussian elimination");
-      else
-        print_matrix_summary("Starting Gaussian elimination");
+      print_matrix("Starting Gaussian elimination");
+      // print_matrix_summary("Starting Gaussian elimination");
       
       result->debug_message("Trying to diagonalize %lu columns ", (long unsigned) blocking_cols.size());
       print_map(blocking_cols);
@@ -2659,10 +2642,8 @@ namespace IIA_Internal
           result->info_message("all_blocking_cols smaller by %lu\n", (unsigned long) num_removed);
           if (num_removed)
           {
-            if (result->log_debug)
-              print_matrix("gaussian ");
-            else
-              print_matrix_summary("gaussian ");
+            print_matrix("gaussian ");
+            // print_matrix_summary("gaussian ");
             
             result->debug_message("%d rows of %d remain diagonalized\n", r, (int) rows.size());
             result->debug_message("remaining diagonalize %lu columns ", (long unsigned) all_blocking_cols.size());
@@ -2824,10 +2805,8 @@ namespace IIA_Internal
         if (result->log_debug)
         {
           result->debug_message("Done reducing row %d and col %d\n",r,lead);
-          if (result->log_debug)
-            print_matrix("done row col");
-          else
-            print_matrix_summary("done row col");
+          print_matrix("done row col");
+          // print_matrix_summary("done row col");
         }
         
         // sanity check
@@ -2854,8 +2833,7 @@ namespace IIA_Internal
     if (result->log_debug)
     {
       result->debug_message("Gaussian elimination finished\n");
-      if (result->log_debug)
-        print_matrix("Gaussian elimination finished");
+      print_matrix("Gaussian elimination finished");
     }
     
     // look for a good row to return, regardless of whether we actually reduced anything
@@ -3736,10 +3714,6 @@ namespace IIA_Internal
     swap(rhs[r],rhs[s]);
     swap(constraint[r],constraint[s]);
     
-    // IIA specific stuff
-    if (names_exist())
-      row_names[r].swap(row_names[s]);
-    
     // swap data from IncrementalIntervalAssignment
     if (parentProblem)
     {
@@ -3987,24 +3961,10 @@ namespace IIA_Internal
     s_vals.swap(new_vals);
   }
   
-  void IncrementalIntervalAssignment::multiply_names_rhs(int r, int s, int u, int v)
+  void IncrementalIntervalAssignment::multiply_rhs(int r, int s, int u, int v)
   {
     if (u==1 && v==0)
       return;
-    
-    if (names_exist())
-    {
-      const int max_size=60;
-      if (row_names[s].size()<max_size)
-      {
-        // append "(*u-v*Rowr)", e.g. "(*2-3*Row4)"
-        row_names[s] = row_names[s] + "(*" + to_string(u) + (abs(v)<0 ? "+" : "") + to_string(v) + "*Row" + to_string(r) +")";
-        if (row_names[s].size()>=max_size)
-        {
-          row_names[s] = row_names[s] + "...";
-        }
-      }
-    }
     
     // rhs update
     auto  rb = rhs[r];
@@ -4018,14 +3978,14 @@ namespace IIA_Internal
   void IncrementalIntervalAssignment::row_us_minus_vr(int r, int s, int u, int v)
   {
     this->matrix_row_us_minus_vr(r,s,u,v);
-    multiply_names_rhs(r,s,u,v);
+    multiply_rhs(r,s,u,v);
   }
   
   void IncrementalIntervalAssignment::row_eliminate_column(int r, int s, int c)
   {
     int u(1),v(1);
     this->matrix_row_eliminate_column(r,s,c,u,v);
-    multiply_names_rhs(r,s,u,v);
+    multiply_rhs(r,s,u,v);
   }
   
   
@@ -4081,7 +4041,6 @@ namespace IIA_Internal
     if (result->log_debug)
     {
       result->debug_message("IIA starting HNF\n");
-      //if (result->log_debug)
       print_problem("Trying HNF on this");
     }
     
@@ -4608,24 +4567,6 @@ namespace IIA_Internal
       
     }
     
-    if (names_exist())
-    {
-      for (auto r : *pRows)
-      {
-        assert(r>=0);
-        const auto t = row_map[r];
-        target->row_names[t]=row_names[r];
-      }
-      for (auto c : *pCols)
-      {
-        assert(c>=0);
-        const auto d = col_map[c];
-        assert(d>=0);
-        assert(d<=target->used_col);
-        target->col_names[d]=col_names[c];
-      }
-    }
-    
     // if there is some column without an associated row, we will have missed it, but that should be OK
     target->fill_in_cols_from_rows();
     
@@ -4688,11 +4629,6 @@ namespace IIA_Internal
     rows.resize(number_of_rows);
     constraint.resize(number_of_rows,EQ);
     rhs.resize(number_of_rows,0);
-    
-    if (names_exist())
-    {
-      row_names.resize(number_of_rows);
-    }
   }
   
   void IncrementalIntervalAssignment::resize_cols()
@@ -4705,14 +4641,8 @@ namespace IIA_Internal
     col_type.resize(number_of_cols,INT_VAR);
     goals.resize(number_of_cols,1.);
     
-    if (names_exist())
-    {
-      col_names.resize(number_of_cols);
-    }
-    
     // skip tied variables
     // we only resize_cols on parent problems, and only allocate tied_variables on sub_problems
-
   }
   
   void IncrementalIntervalAssignment::add_more_rows()
@@ -4964,47 +4894,6 @@ namespace IIA_Internal
     // columns not filled in yet
   }
   
-  void clear_row(int row);
-
-  
-  void IncrementalIntervalAssignment::set_problem_name( const char *name )
-  {
-    problem_name=name;
-  }
-  
-  const char *IncrementalIntervalAssignment::get_problem_name() const
-  {
-    return problem_name.c_str();
-  }
-  
-  void IncrementalIntervalAssignment::set_row_name(int row, const char *name)
-  {
-    if (names_exist())
-    {
-      row_names[row]=string(name);
-    }
-  }
-  const char *IncrementalIntervalAssignment::get_row_name(int row) const
-  {
-    if (names_exist())
-      return row_names[row].c_str();
-    return nullptr;
-  }
-  
-  
-  void IncrementalIntervalAssignment::set_col_name(int col, const char *name)
-  {
-    if (names_exist())
-      col_names[col]=string(name);
-  }
-  
-  const char *IncrementalIntervalAssignment::get_col_name(int col) const
-  {
-    if (names_exist())
-      return col_names[col].c_str();
-    return nullptr;
-  }
-  
   int IncrementalIntervalAssignment::solve_sub(bool do_improve)
   {
     // solve a subproblem
@@ -5016,7 +4905,7 @@ namespace IIA_Internal
     //     increment by (linear combinations of) vectors from the nullspace
     
     // debug
-    result->debug_message( "\n---- solving solve_sub %s ----\n",get_problem_name());
+    result->debug_message( "\n---- solving solve_sub ----\n");
     CpuTimer timer;
     double time_rref(0.), time_constrain(0.), time_bound(0.), time_opt(0.), time_tune(0.);
     // debug
@@ -5058,10 +4947,8 @@ namespace IIA_Internal
     
     if (result->log_debug)
     {
-      if (result->log_debug)
-        print_problem("solve_sub before RREF");
-      else
-        print_problem_summary("solve_sub before RREF");
+      print_problem("solve_sub before RREF");
+      // print_problem_summary("solve_sub before RREF");
     }
     
     // it saves time and gets better output to compute a different rref for solving the constraints vs. improving the bounds and solution
@@ -5077,7 +4964,6 @@ namespace IIA_Internal
       EqualsB *this_B = this;
       MatrixSparseInt Asave(*this_matrix);
       EqualsB Bsave(*this_B);
-      vector<string> row_names_save(row_names);
       
       // row echelon for constraints
       bool rref_OK = rref_constraints(rref_col_order);
@@ -5085,13 +4971,9 @@ namespace IIA_Internal
       // debug
       if (result->log_debug)
       {
-        if (result->log_debug)
-          print_problem("solve_sub after RREF constraints",rref_col_order);
-        else
-          print_problem_summary("solve_sub after RREF constraints");
-      }
-      if (result->log_debug)
-      {
+        print_problem("solve_sub after RREF constraints",rref_col_order);
+        // print_problem_summary("solve_sub after RREF constraints");
+
         time_rref = timer.cpu_secs();
         result->info_message("rref time %f\n",time_rref);
       }
@@ -5111,9 +4993,9 @@ namespace IIA_Internal
       
       // debug
       // print_problem("solve_sub initial_feasible_solution ");
-      if (result->log_debug) print_solution("solve_sub initial constraints solution ");
       if (result->log_debug)
       {
+        print_solution("solve_sub initial constraints solution ");
         time_constrain = timer.cpu_secs();
         result->info_message("feasible constraints solution time %f\n",time_constrain);
       }
@@ -5131,14 +5013,11 @@ namespace IIA_Internal
       {
         swap(*this_matrix,Asave);
         swap(*this_B,Bsave);
-        swap(row_names,row_names_save);
         
         if (result->log_debug)
         {
-          if (result->log_debug)
-            print_problem("solve_sub after restoring to before RREF state");
-          else
-            print_problem_summary("solve_sub after restoring to before RREF state");
+          print_problem("solve_sub after restoring to before RREF state");
+          // print_problem_summary("solve_sub after restoring to before RREF state");
         }
       }
       
@@ -5159,10 +5038,8 @@ namespace IIA_Internal
         // debug
         if (result->log_debug)
         {
-          if (result->log_debug)
-            print_problem("solve_sub after RREF improve", rref_col_order);
-          else
-            print_problem_summary("solve_sub after RREF improve");
+          print_problem("solve_sub after RREF improve", rref_col_order);
+          // print_problem_summary("solve_sub after RREF improve");
         }
         //debug
         
@@ -5176,10 +5053,8 @@ namespace IIA_Internal
       // debug
       if (result->log_debug)
       {
-        if (result->log_debug)
-          M.print_matrix("nullspace ");
-        else
-          M.print_matrix_summary("nullspace ");
+        M.print_matrix("nullspace ");
+        // M.print_matrix_summary("nullspace ");
       }
       // debug
     }
@@ -5238,10 +5113,8 @@ namespace IIA_Internal
       // debug
       if (result->log_debug)
       {
-        if (result->log_debug)
-          print_solution("tied variable solution");
-        else
-          print_solution_summary("tied variable solution");
+        print_solution("tied variable solution");
+        // print_solution_summary("tied variable solution");
       }
     }
     
@@ -5249,10 +5122,9 @@ namespace IIA_Internal
     {
       double time_assign_tied = timer.cpu_secs();
       result->info_message("assign tied variable time %f\n",time_tune);
-      result->info_message("total solve sub %s time %f\n",get_problem_name(), time_rref + time_constrain + time_bound + time_opt + time_tune + time_assign_tied);
+      result->info_message("total solve_sub time %f\n", time_rref + time_constrain + time_bound + time_opt + time_tune + time_assign_tied);
+      result->debug_message( "\n---- done solve_sub ----\n\n");
     }
-    
-    result->debug_message( "\n---- done solve_sub %s ----\n\n",get_problem_name());
     
     return true;
   }
@@ -5328,11 +5200,6 @@ namespace IIA_Internal
     col_lower_bounds[slack_var]=0;
     col_upper_bounds[slack_var]=0;
     
-    if (names_exist())
-    {
-      col_names[slack_var]="slack_" + to_string(slack_var) + "_row_" + to_string(r);
-    }
-    
     // assign slack variable a value
     int slack = row_sum(r);
     col_solution[slack_var]=slack;
@@ -5367,10 +5234,6 @@ namespace IIA_Internal
         
         constraint[r]=EQ;
         
-        if (names_exist())
-        {
-          col_names[c]="sum_even_row_" + to_string(r);
-        }
         ++num_even;
         
         if (row_is_new)
@@ -5399,10 +5262,6 @@ namespace IIA_Internal
         
         constraint[r]=EQ;
         
-        if (names_exist())
-        {
-          col_names[c]="inequality_freedom_row_" + to_string(r);
-        }
         ++num_ineq;
         
         if (row_is_new)
@@ -5461,15 +5320,23 @@ namespace IIA_Internal
   
   bool IncrementalIntervalAssignment::solve(bool do_improve, bool first_time)
   {
+    // debug
     result->info_message("Running incremental interval assignment.\n");
     
     CpuTimer total_timer;
     double setup_time=0, map_time(0.);
-
     if (result->log_debug)
     {
       print_problem("full problem initial before setup");
       // print_problem_summary("full problem initial before setup");
+    }
+    // debug
+    
+    if (solved_used_row<0)
+      first_time=true;
+    else if (first_time)
+    {
+      solved_used_row = -1; // force it to ignore any prior solution
     }
     
     count_used_rows_cols();
@@ -5482,9 +5349,6 @@ namespace IIA_Internal
     identify_col_type();
     
     convert_inequalities();
-
-    if (solved_used_row<0)
-      first_time=true;
     
     int new_row_min = -1, new_row_max = -1;
     if (first_time)
@@ -5590,8 +5454,6 @@ namespace IIA_Internal
         result->debug_message("\nSolving interval matching 'map' phase.\n");
       else
         result->debug_message("\nSolving interval matching 'even' phase.\n");
-
-      set_problem_name( "big ip" );
       print_problem("\nEntire Interval Problem");
     }
     
@@ -5650,10 +5512,7 @@ namespace IIA_Internal
   
   void IncrementalIntervalAssignment::print_row_iia(size_t r) const
   {
-    if (names_exist())
-      result->info_message("  %d %s: ", (int) r, row_names[r].c_str());
-    else
-      result->info_message("  %d row: ", (int) r);
+    result->info_message("  %d row: ", (int) r);
     auto &row=rows[r];
     auto &cols=row.cols;
     auto &vals=row.vals;
@@ -5661,11 +5520,7 @@ namespace IIA_Internal
     {
       auto v = vals[i];
       auto c = cols[i];
-      result->info_message( "%+dx%d", v, c );
-      if (!col_names.empty())
-        result->info_message("(%s) ", col_names[c].c_str());
-      else
-        result->info_message(" ");
+      result->info_message( "%+dx%d ", v, c );
     }
     
     switch (constraint[r])
@@ -5694,10 +5549,7 @@ namespace IIA_Internal
   void IncrementalIntervalAssignment::print_col_iia(size_t c) const
   {
     // col indices
-    if (names_exist())
-      result->info_message("  x%d %s", (int) c, col_names[c].c_str());
-    else
-      result->info_message("  x%d col", (int) c);
+    result->info_message("  x%d col", (int) c);
     result->info_message(" rows:");
     print_vec(result, col_rows[c], false);
     
@@ -5721,8 +5573,7 @@ namespace IIA_Internal
       result->info_message("\n");
     else
       result->info_message("%s ",prefix.c_str());
-    result->info_message("IIA problem summary %s\n",
-                         problem_name.c_str());
+    result->info_message("IIA problem summary\n");
     result->info_message("  %d rows (0..%d used), %d cols (0..%d used), %lu non-zeros",
                          number_of_rows, used_row,
                          number_of_cols, used_col, (unsigned long) num_nonzeros());
@@ -5735,8 +5586,7 @@ namespace IIA_Internal
       result->info_message("\n");
     else
       result->info_message("%s ",prefix.c_str());
-    result->info_message("IIA problem %s\n",
-                         problem_name.c_str());
+    result->info_message("IIA problem\n");
     result->info_message("  number rows = %d (0 to %d used)\n"
                          "  number cols = %d (0 to %d used)\n",
                          number_of_rows, used_row,
@@ -5758,10 +5608,7 @@ namespace IIA_Internal
     result->info_message("Column values\n");
     for (size_t c=0; (int) c <= used_col && c < col_rows.size(); ++c)
     {
-      if (names_exist())
-        result->info_message("  x%d %s", (int) c, col_names[c].c_str());
-      else
-        result->info_message("  x%d col", (int) c);
+      result->info_message("  x%d col", (int) c);
       result->info_message(" bounds=[%s,%s], goal=%f, solution=%d",
                            (numeric_limits<int>::lowest() == col_lower_bounds[c] ? "-inf" : to_string(col_lower_bounds[c]).c_str()),
                            (numeric_limits<int>::max()    == col_upper_bounds[c] ? "+inf" : to_string(col_upper_bounds[c]).c_str()),
@@ -5806,8 +5653,7 @@ namespace IIA_Internal
       result->info_message("\n");
     else
       result->info_message("%s ",prefix.c_str());
-    result->info_message("IIA solution summary %s\n",
-                         problem_name.c_str());
+    result->info_message("IIA solution summary\n");
     result->info_message("  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
     result->info_message("Solution is %s.\n", (verify_full_solution(true,true) ? "feasible" : "BAD"));
     // might be "BAD" because the tied variables are not assigned values yet...
@@ -5819,8 +5665,7 @@ namespace IIA_Internal
       result->info_message("\n");
     else
       result->info_message("%s ",prefix.c_str());
-    result->info_message("IIA solution %s\n",
-                         problem_name.c_str());
+    result->info_message("IIA solution\n");
     result->info_message("  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
     // result->info_message("var values stubbed out\n"); // zzyk
     for (int c=0; c <= used_col && c < (int)col_rows.size(); ++c)
@@ -5844,11 +5689,7 @@ namespace IIA_Internal
   
   void IncrementalIntervalAssignment::print_solution_col(int c) const
   {
-    if (names_exist())
-      result->info_message("  x%d %s", (int) c, col_names[c].c_str());
-    else
-      result->info_message("  x%d col", (int) c);
-    result->info_message(" = %d", col_solution[c]);
+    result->info_message("  x%d col = %d", c, col_solution[c]);
     if (has_tied_variables && tied_variables[c].size()==1)
     {
       const auto c2 = tied_variables[c].front();
@@ -6126,12 +5967,6 @@ namespace IIA_Internal
         copy_submatrix( &sub_rows, &sub_cols, row_map.data(), column_map.data(), sub_problem );
         
         // debug
-        if (names_exist())
-        {
-          string title = "subproblem ";
-          title += to_string(sub_problems.size());
-          sub_problem->set_problem_name( title.c_str() );
-        }
         if (result->log_debug)
         {
           string title = "subproblem ";
@@ -6214,9 +6049,8 @@ namespace IIA_Internal
       {
         if (print_unsatisfied_constraints)
         {
-          result->info_message("Variable x%d %s = %d < %d, below lower bound.\n",
+          result->info_message("Variable x%d = %d < %d, below lower bound.\n",
                                c,
-                               names_exist() ? col_names[c].c_str() : "",
                                sol,
                                lower);
           ++num_out_of_bounds;
@@ -6232,9 +6066,8 @@ namespace IIA_Internal
       {
         if (print_unsatisfied_constraints)
         {
-          result->info_message("Variable x%d %s = %d > %d, above upper bound.\n",
+          result->info_message("Variable x%d = %d > %d, above upper bound.\n",
                                c,
-                               names_exist() ? col_names[c].c_str() : "",
                                sol,
                                upper);
           worst_out_of_bound=max(worst_out_of_bound,sol-upper);
@@ -6301,8 +6134,7 @@ namespace IIA_Internal
       {
         if (print_unsatisfied_constraints)
         {
-          result->info_message("Constraint row %d %s is not satisfied.  It involves ",
-                               row, names_exist() ? row_names[row].c_str() : "" );
+          result->info_message("Constraint row %d is not satisfied.  It involves ", row );
           print_row_iia(row);
           result->info_message("(lhs %d)",lhs);
           switch (ctype)
@@ -6358,5 +6190,36 @@ namespace IIA_Internal
     }
     result->info_message("\n");
   }
-  
+
+  void IncrementalIntervalAssignment::copy_me( IncrementalIntervalAssignment *target )
+  {
+    // Matrix
+    target->result   = result;
+    target->rows     = rows;
+    target->col_rows = col_rows;
+    
+    // EqualsB
+    target->rhs        = rhs;
+    target->constraint = constraint;
+
+    // IncrementalIntervalAssignment
+    target->hasBeenSolved    = hasBeenSolved;
+    target->number_of_rows   = number_of_rows;
+    target->used_row         = used_row;
+    target->solved_used_row  = solved_used_row;
+    target->number_of_cols   = number_of_cols;
+    target->used_col         = used_col;
+    target->col_lower_bounds = col_lower_bounds;
+    target->col_upper_bounds = col_upper_bounds;
+    target->col_solution     = col_solution;
+    target->goals            = goals;
+    target->col_type         = col_type;
+    target->parentProblem    = parentProblem;
+    target->parentRows       = parentRows;
+    target->parentCols       = parentCols;
+    target->lastCopiedCol    = lastCopiedCol;
+    
+    // don't do anything with result
+  }
+
 } // namespace

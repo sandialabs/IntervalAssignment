@@ -27,6 +27,22 @@ namespace IIA
     ia = nullptr;
   }
   
+  IA::IA(IA &copy_ia)
+  {
+    auto r = new IAResultImplementation();
+    result = r;
+    ia = new IncrementalIntervalAssignment(r);
+
+    *result = *copy_ia.result;
+    copy_ia.ia->copy_me( ia );
+  }
+  
+  void IA::copy_me(IA &target)
+  {
+    *target.result = *result;
+    ia->copy_me( target.ia );
+  }
+
   
   //== space for problem
   void IA::clear()

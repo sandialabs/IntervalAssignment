@@ -179,6 +179,8 @@ namespace IIA_Internal
     
     const IAResultImplementation *get_result() const {return result;}
 
+    void copy_me( IncrementalIntervalAssignment *target );
+
     // solve interval assignment Mx = B for x
     //   also works to re-solve a problem after adding new rows.
     //   first_time is just a hint.
@@ -256,18 +258,11 @@ namespace IIA_Internal
     void print_solution_summary(string prefix) const;
     void print() const;
     
-    void set_problem_name( const char *problem_name );
-    void set_row_name(int row, const char *name);
-    void set_col_name(int col, const char *name);
-    const char *get_problem_name() const;
-    const char *get_row_name(int row) const;
-    const char *get_col_name(int col) const;
-
   protected: // data
     
     bool hasBeenSolved=false;
     int number_of_rows=0, used_row=-1, solved_used_row=-1;
-    int number_of_cols=0, used_col=-1, solved_used_col=-1;
+    int number_of_cols=0, used_col=-1;
     
     vector<int> col_lower_bounds, col_upper_bounds, col_solution;
     vector<double> goals;
@@ -286,31 +281,13 @@ namespace IIA_Internal
     // my row x is parentProblem's row parentRows[x]
     
     vector<int> parentCols;
-    // vector<TDILPIntegerVariable*> intVars;
-    int numSoftEdges=0;
-    //- number of edges figuring into objective function
     
     int lastCopiedCol=0;
     //- If this is a subproblem, then lastCopiedCol = the number of
     //- copied columns from big ilp. Otherwise 0.
     
-    int numDummies=0;
-    //- number of dummy variables associated with this LP
-    
-    int sumEvenDummies=0;
-    //- number of dummies that should be set to integer, usually for
-    //- sum(I(e)) = even constraints.
-    
-    int usedDummies=0;
-    
-    // names for debugging only. Usually these aren't assigned so incur minimal overhead
-    bool names_exist() const;
-    vector<string> row_names, col_names;
-    string problem_name;
-    
-    
   protected: // methods
-    
+
     // the design is all interval matching implementations will have two passes
     //   map means solve everything except the sum-even constraints (possibly return a non-integer solution)
     //   even means solve all constraints, return an integer solution
@@ -410,7 +387,7 @@ namespace IIA_Internal
     void row_us_minus_vr(int r, int s, int u, int v);
   
     // do the remaining stuff that the matrix versions don't
-    void multiply_names_rhs(int r, int s, int u, int v);
+    void multiply_rhs(int r, int s, int u, int v);
     
     // The three main methods of the overall solve are
     //   satisfy_constraints:  initial feasible solution satisfying the constraints, Ax=b
@@ -611,7 +588,7 @@ namespace IIA_Internal
   IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr)
   {
   }
-  
+
   inline
   IncrementalIntervalAssignment* IncrementalIntervalAssignment::new_sub_problem()
   {
@@ -663,7 +640,6 @@ namespace IIA_Internal
     rows[row].cols.clear();
     rows[row].vals.clear();
   }
-
   
 } // namespace
 
