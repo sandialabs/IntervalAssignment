@@ -1,6 +1,8 @@
 //- file IncrementalIntervalAssignment.cpp
 #include "IncrementalIntervalAssignment.h"
 
+#include "IAQueue.h"
+
 #include <numeric>
 #include <cmath>
 
@@ -36,7 +38,7 @@
 //   beautify output
 //   collect public, private methods of IncrementalIntervalAssignment in header file
 //   organize like methods
-//   combine solve_map and solve_even into one function
+//  x combine solve_map and solve_even into one function
 //  x vector -> using vector,  vector
 //   cmake
 //   test on a few compilers
@@ -612,433 +614,6 @@ namespace IIA_Internal
     return goal;
   }
   
-  bool IncrementalIntervalAssignment::SetValuesFn::update_values(IncrementalIntervalAssignment &iia, QElement &qe)
-  {
-    // no solution previously?
-    if (!qe.solution_set)
-    {
-      qe.solution_set=true;
-      qe.solution = iia.col_solution[qe.c];
-      set_values_implementation(iia, qe );
-      return true;
-    }
-    // queue priority based on a different solution value?
-    if (qe.solution!=iia.col_solution[qe.c])
-    {
-      QElement qe_old = qe;
-      qe.solution = iia.col_solution[qe.c];
-      set_values_implementation(iia, qe );
-      return ( qe < qe_old ); // ||  qe_old < qe
-    }
-    return false;
-  }
-  
-  void IncrementalIntervalAssignment::SetValuesFn::set_values(IncrementalIntervalAssignment &iia, QElement &qe, int solution)
-  {
-    qe.solution=solution;
-    qe.solution_set=true;
-    set_values_implementation(iia,qe);
-  }
-  
-  void IncrementalIntervalAssignment::SetValuesFn::set_values(IncrementalIntervalAssignment &iia, QElement &qe)
-  {
-    qe.solution=iia.col_solution[qe.c];
-    qe.solution_set=true;
-    set_values_implementation(iia,qe);
-  }
-  
-  
-  void IncrementalIntervalAssignment::SetValuesBounds::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
-  {
-    if (qe.c>-1)
-    {
-      assert(qe.solution_set);
-      auto diff = iia.compute_out_of_bounds(qe.c,qe.solution);
-      qe.valueA = abs(diff);
-      qe.dx = (diff > 0 ? 1 :  (diff < 0 ? -1 : 0) );
-      double glo,ghi;
-      // qe.valueB = (iia.compute_tied_goals(qe.c,glo,ghi) ? abs(ghi): abs(glo));
-      bool tied = iia.compute_tied_goals(qe.c,glo,ghi);
-      if (tied)
-      {
-        // tied-to variables get the highest priority of all the tied variables
-        qe.valueB = abs(ghi);
-        qe.valueC = abs(glo);
-      }
-      else
-      {
-        qe.valueB = abs(glo);
-        qe.valueC = 0;
-      }
-    }
-    else
-    {
-      qe.valueA = 0;
-      qe.valueB = 0;
-      qe.valueC = 0;
-    }
-  }
-  
-  void IncrementalIntervalAssignment::SetValuesRatioR::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
-  {
-    auto &c=qe.c;
-    if (c>-1)
-    {
-      double glo,ghi;
-      if (iia.compute_tied_goals(c,glo,ghi))
-      {
-        QElement qh = qe;
-        set_values_goal(iia,glo,qe);
-        set_values_goal(iia,ghi,qh);
-        // return the *higher* priority
-        if (qe<qh)
-        {
-          swap(qe,qh);
-        }
-      }
-      else
-      {
-        set_values_goal(iia,glo,qe);
-      }
-    }
-    else
-    {
-      qe.valueA = 0.;
-      qe.valueB = 0.;
-      qe.valueC = -2.;
-    }
-  }
-  
-  void IncrementalIntervalAssignment::SetValuesRatioR::set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe )
-  {
-    assert(qe.solution_set);
-    if (g==0.) // its a "don't care" dummy variable
-    {
-      qe.valueA=0.;
-      qe.valueB=0.;
-      qe.valueC=0.;
-      return;
-    }
-    const int x_int = qe.solution;
-    const double x = (double) x_int;
-    if (x+1.<g)
-    {
-      qe.valueA = (x+1>1e-2 ? g/(x+1.) : 1000.*g*(abs(x+1)+1.));
-      qe.dx = 1; // want increment
-    }
-    else if (x-1.>g)
-    {
-      qe.valueA = (x-1.)/g; // (g>1e-2 ? (x-1.)/g : 1000*(x-1)*(abs(g)+1.));
-      qe.dx = -1; // desire decrement
-    }
-    else
-    {
-      double pre,post;
-      if (x>g)
-      {
-        pre  = x/g; // (g>1e-2   ? x/g      : 1000*x*(abs(g)+1.));
-        post = (x-1>1e-2 ? g/(x-1.) : 1000.*g-x);
-        qe.dx = -1;
-      }
-      else
-      {
-        pre  = (x>1e-2 ? g/x      : 1000.*g*(abs(x)+1.));
-        post = (x+1.)/g; // (g>1e-2 ? (x+1.)/g : 1000*(x+1)*(abs(g)+1.));
-        qe.dx = 1;
-      }
-      qe.valueA = pre-post; // was pre-post+1, but then goal of 1 has solution 2 and 3 to have the same value!!!
-    }
-    // a value less than 1 means the value would get worse than it is currently
-    qe.valueB = -g; // prefer to change curves with small goals first, if ratios are equal
-    qe.valueC = 0.;
-    
-    // if we desire increment and we are already at the upper bound, set the priority to 0
-    if (qe.dx>0)
-    {
-      if (x_int>=iia.col_upper_bounds[qe.c])
-      {
-        qe.valueA=0.;
-        qe.valueB=0.;
-        qe.valueC=0.;
-      }
-    }
-    // if we desire decrement and we are already at the lower bound, set the priority to 0
-    else
-    {
-      if (x_int<=iia.col_lower_bounds[qe.c])
-      {
-        qe.valueA=0.;
-        qe.valueB=0.;
-        qe.valueC=0.;
-      }
-    }
-  }
-  
-  void IncrementalIntervalAssignment::SetValuesRatio::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
-  {
-    auto &c=qe.c;
-    if (c>-1)
-    {
-      double glo,ghi;
-      if (iia.compute_tied_goals(c,glo,ghi))
-      {
-        QElement qh = qe;
-        set_values_goal(iia,glo,qe);
-        set_values_goal(iia,ghi,qh);
-        // return the *higher* priority
-        if (qe<qh)
-        {
-          swap(qe,qh);
-        }
-      }
-      else
-      {
-        set_values_goal(iia,glo,qe);
-      }
-    }
-    else
-    {
-      qe.valueA = 0.;
-      qe.valueB = 0.;
-      qe.valueC = -2.;
-    }
-  }
-  
-  void IncrementalIntervalAssignment::SetValuesRatio::set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe )
-  {
-    assert(qe.solution_set);
-    if (g==0.) // its a "don't care" dummy variable
-    {
-      qe.valueA=0.;
-      qe.valueB=0.;
-      qe.valueC=0.;
-      return;
-    }
-    
-    int x_int = qe.solution;
-    double x = (double) x_int;
-    if (x<g)
-    {
-      qe.valueA = (x>1e-2 ? g/x : 1000.*g*(abs(x)+1.));
-      qe.dx = 1; // want increment
-    }
-    else
-    {
-      qe.valueA = x/g; // scaling away from zero is done within set_goal now. (g>1e-2 ? x/g : 1000*x*(abs(g)+1.));
-      qe.dx = -1; // desire decrement
-    }
-    qe.valueB = -g;  // prefer to change curves with small goals first
-    qe.valueC = 0.;
-    
-    // if we desire increment and we are already at the upper bound, set the priority to 0
-    if (qe.dx>0)
-    {
-      if (x_int>=iia.col_upper_bounds[qe.c])
-      {
-        qe.valueA=0.;
-        qe.valueB=0.;
-        qe.valueC=0.;
-      }
-    }
-    // if we desire decrement and we are already at the lower bound, set the priority to 0
-    else
-    {
-      if (x_int<=iia.col_lower_bounds[qe.c])
-      {
-        qe.valueA=0.;
-        qe.valueB=0.;
-        qe.valueC=0.;
-      }
-    }
-  }
-  
-  bool IncrementalIntervalAssignment::QWithReplacement::tip_top( IncrementalIntervalAssignment::QElement &t)
-  {
-    iia->result->debug_message("Q size %d ", (int) Q.size());
-    if (Q.empty())
-    {
-      t = QElement();
-      return true;
-    }
-    
-    // end of set is the highest-priority item
-    auto Qback = --Q.end();
-    t = *Qback;
-    Q.erase(Qback);
-    elements.erase(t.c);
-    
-    if (iia->result->log_debug)
-    {
-      iia->result->info_message("tip top ");
-      t.print(iia);
-    }
-    return false;
-  }
-  
-  void IncrementalIntervalAssignment::QWithReplacement::update(const vector<int> &cols)
-  {
-    if (/* DISABLES CODE */ (0) && iia->result->log_debug)
-    {
-      iia->result->info_message("Q before update ");
-      print();
-    }
-    
-    for (auto c : cols)
-    {
-      auto it = elements.find(c);
-      // column wasn't in the queue
-      if (it==elements.end())
-      {
-        add(c);
-      }
-      // column was in the queue, and solution changed
-      else if (it->second.solution != iia->col_solution[c])
-      {
-        QElement qe;
-        qe.c = c;
-        val_fn->set_values(*iia,qe);
-        // remove from Q
-        Q.erase(it->second);
-        // replace element
-        if (qe.valueA>threshold)
-        {
-          it->second=qe;
-          // update Q
-          Q.insert(qe);
-        }
-        // remove element
-        else
-        {
-          elements.erase(it);
-        }
-      }
-    }
-    
-    if (/* DISABLES CODE */ (0) && iia->result->log_debug)
-    {
-      iia->result->info_message("Q after update ");
-      print();
-    }
-    
-  }
-  
-  void IncrementalIntervalAssignment::QElement::print(IncrementalIntervalAssignment *iia)
-  {
-    iia->result->info_message("qe c:%d ",c);
-    if (!solution_set)
-      iia->result->info_message("unset");
-    else
-      iia->result->info_message("sol:%d",solution);
-    iia->result->info_message(" A:%f B:%f C:%f\n",valueA,valueB,valueC);
-  }
-  
-  void IncrementalIntervalAssignment::QWithReplacement::print()
-  {
-    iia->result->info_message("QWithReplacement %lu elements, threshold %f\n", (unsigned long) elements.size(), threshold);
-    //  for (auto it : elements)
-    //  {
-    //    result->info_message("%d ", it.first);
-    //    it.second.print();
-    //  }
-    iia->result->info_message("Q %lu set\n", (unsigned long) Q.size() );
-    for (auto e : Q)
-    {
-      e.print(iia);
-    }
-  }
-  
-  bool IncrementalIntervalAssignment::tip_top( priority_queue<QElement> &Q, SetValuesFn &val_fn, double threshold, QElement &t)
-  {
-    result->debug_message("Q size %d ", (int) Q.size());
-    if (Q.empty())
-    {
-      result->debug_message("Q empty, all done!!!\n");
-      t = QElement();
-      return true;
-    }
-    
-    t = Q.top(); // copy
-    Q.pop();
-    
-    // Check that the element value is up to date.
-    // If not, then put it back on the queue and get the new top
-    while ( val_fn.update_values(*this,t) )
-    {
-      result->debug_message("Q stale.\n");
-      if (t.valueA>threshold)
-      {
-        //      // alternatively
-        //      //   if t is not smaller than the current top, so return it as if it were the top
-        //      if (! (t<Q.top()) )
-        //      {
-        //        break;
-        //      }
-        result->debug_message("Q reque.\n");
-        Q.push(t);
-      }
-      else
-      {
-        result->debug_message("Q tossed.\n");
-      }
-      
-      if (Q.empty())
-      {
-        result->debug_message("Q empty, all done!!!\n");
-        t = QElement();
-        return true;
-      }
-      t = Q.top();
-      Q.pop();
-    }
-    
-    // clear any remaining values below the threshold
-    if (t.valueA<=threshold)
-    {
-      result->debug_message("Q being emptied.\n");
-      Q = priority_queue<QElement>();
-    }
-    result->debug_message("Q tip top %d values %g %g, remaining Q size %d\n", t.c, t.valueA, t.valueB, (int) Q.size());
-    
-    return false;
-  }
-  
-  void IncrementalIntervalAssignment::QWithReplacement::add(int c)
-  {
-    QElement qe;
-    qe.c = c;
-    val_fn->set_values(*iia,qe);
-    if (qe.valueA>threshold)
-    {
-      elements[c]=qe;
-      Q.insert(qe);
-      // return true;
-    }
-    // return false;
-  }
-  
-  void IncrementalIntervalAssignment::QWithReplacement::build(const vector<int> &qcol)
-  {
-    for (auto c : qcol )
-    {
-      add(c);
-    }
-  }
-  
-  void IncrementalIntervalAssignment::build_Q(priority_queue< QElement > &Q,
-                                              SetValuesFn &set_val_fn,
-                                              double threshold,
-                                              const vector<int> &qcol)
-  {
-    for (auto c : qcol )
-    {
-      QElement qe;
-      qe.c = c;
-      set_val_fn.set_values(*this,qe);
-      if (qe.valueA>threshold)
-        Q.push( qe );
-    }
-  }
-  
   bool IncrementalIntervalAssignment::infeasible_constraints()
   {
     bool rc=false;
@@ -1124,7 +699,6 @@ namespace IIA_Internal
       else if (constraint[r]==LE || constraint[r]==GE)
       {
         // check if constraint is feasible first, return failure if not
-        // this is important for autoscheme for surfaces with all hard-set intervals
         if (con==LE)
         {
           int sum=0;
@@ -1296,6 +870,77 @@ namespace IIA_Internal
     //debug
     
     return rc;
+  }
+  
+  void IncrementalIntervalAssignment::build_Q(priority_queue< QElement > &Q,
+                                              SetValuesFn &set_val_fn,
+                                              double threshold,
+                                              const vector<int> &qcol)
+  {
+    for (auto c : qcol )
+    {
+      QElement qe;
+      qe.c = c;
+      set_val_fn.set_values(*this,qe);
+      if (qe.valueA>threshold)
+        Q.push( qe );
+    }
+  }
+  
+  
+  bool IncrementalIntervalAssignment::tip_top( priority_queue<QElement> &Q, SetValuesFn &val_fn, double threshold, QElement &t)
+  {
+    result->debug_message("Q size %d ", (int) Q.size());
+    if (Q.empty())
+    {
+      result->debug_message("Q empty, all done!!!\n");
+      t = QElement();
+      return true;
+    }
+    
+    t = Q.top(); // copy
+    Q.pop();
+    
+    // Check that the element value is up to date.
+    // If not, then put it back on the queue and get the new top
+    while ( val_fn.update_values(*this,t) )
+    {
+      result->debug_message("Q stale.\n");
+      if (t.valueA>threshold)
+      {
+        //      // alternatively
+        //      //   if t is not smaller than the current top, so return it as if it were the top
+        //      if (! (t<Q.top()) )
+        //      {
+        //        break;
+        //      }
+        result->debug_message("Q reque.\n");
+        Q.push(t);
+      }
+      else
+      {
+        result->debug_message("Q tossed.\n");
+      }
+      
+      if (Q.empty())
+      {
+        result->debug_message("Q empty, all done!!!\n");
+        t = QElement();
+        return true;
+      }
+      t = Q.top();
+      Q.pop();
+    }
+    
+    // clear any remaining values below the threshold
+    if (t.valueA<=threshold)
+    {
+      result->debug_message("Q being emptied.\n");
+      Q = priority_queue<QElement>();
+    }
+    result->debug_message("Q tip top %d values %g %g, remaining Q size %d\n", t.c, t.valueA, t.valueB, (int) Q.size());
+    
+    return false;
   }
   
   
@@ -1708,7 +1353,7 @@ namespace IIA_Internal
       }
       else
       {
-        IncrementalIntervalAssignment::QElement qc;
+        QElement qc;
         qc.c=s.c;
         constraint_fn->set_values(*this, qc);
         if (qc.valueA>constraint_threshold)
@@ -2374,7 +2019,7 @@ namespace IIA_Internal
     sort(q.begin(),q.end());
   }
   
-  bool IncrementalIntervalAssignment::is_better( vector<QElement> &qA, vector<QElement> &qB)
+  bool is_better( vector<QElement> &qA, vector<QElement> &qB)
   {
     // true if A<B by lexicographic min max
     //   true if A[i]<B[i] for some i and A[j]<=B[j] for all j>i
@@ -3507,110 +3152,6 @@ namespace IIA_Internal
     }
     return vals;
   }
-  
-  void IncrementalIntervalAssignment::SetValuesOneCoeff::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
-  {
-    // valuesA = has only one coefficient, of value 1
-    // valuesB = has a goal of 0 (is a slack variable)
-    // valuesC = prefer variables with a larger goal (to be dependent variables, leaving the ones with small goals to be the independent ones)
-    qe.valueA=0.;
-    qe.valueB=0.;
-    qe.valueC=0.;
-    
-    const int c = qe.c;
-    if (iia.col_rows[c].size()==1)
-    {
-      const int cr = iia.col_rows[c][0];
-      const int c_coeff = iia.rows[cr].get_val(c);
-      if (abs(c_coeff)==1)
-      {
-        qe.valueA=1.;
-        qe.valueB= (qe.valueC==0. ? 1 : 0);
-        // pick based on lower goal, unsure what's best
-        double glo, ghi;
-        iia.compute_tied_goals(c,glo,ghi);
-        qe.valueC=glo;
-      }
-    }
-  }
-  
-  void IncrementalIntervalAssignment::SetValuesNumCoeff::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
-  {
-    // valuesA = -number of coefficients
-    // valuesB = -smallest coefficient magnitude
-    // valuesC = larger goal (because if these are in fewer rref rows then they end up in more nullspace vectors)
-    
-    // exceptions for different types of variables: edge; sum-even coeff 2, sum-even coeff 1; slack equality, slack inequality.
-    
-    const int c = qe.c;
-    // valueA
-    qe.valueA = - ((int) iia.col_rows[c].size());
-    // valueB
-    {
-      int smallest_coeff = numeric_limits<int>::max();
-      for (auto r : iia.col_rows[c])
-      {
-        const int c_coeff = abs(iia.rows[r].get_val(c));
-        smallest_coeff = min( smallest_coeff, c_coeff );
-      }
-      qe.valueB = -smallest_coeff;
-    }
-    // valueC
-    auto ctype = iia.col_type[c];
-    if (ctype==INT_VAR)
-    {
-      double glo, ghi;
-      iia.compute_tied_goals(c,glo,ghi);
-      qe.valueC=glo; // prefer longer ones
-    }
-    else if (ctype==EVEN_VAR)  // sum-even
-    {
-      if (fabs(qe.valueB)!=1)
-      {
-        // sum-even with coefficient 2, don't want to pick it
-        qe.valueA = numeric_limits<int>::lowest()/4; // will never get picked, even if it is in only one row
-      }
-      qe.valueC = numeric_limits<int>::max()/2; // highly desirable: weak bounds, don't care quality, OK if in many nullspace rows
-    }
-    else // constraint slack variable
-    {
-      // distinguish equality slack (bad to pick) from inequality slack (OK to pick)
-      // equality slack
-      if (iia.col_lower_bounds[c]==iia.col_upper_bounds[c])
-      {
-        // undesireable, highly constrained to a single value. want it to be independent so it's isolated in its own nullspace row, not dependent on any other slacks
-        qe.valueA = numeric_limits<int>::lowest()/2; // this way it will never get picked, even if it is in only one row
-      }
-      qe.valueC = -1;
-    }
-  }
-  
-  void IncrementalIntervalAssignment::SetValuesCoeffRowsGoal::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
-  {
-    // valuesA = value of smallest coefficient
-    // valuesB = number of rows it appears in
-    // valuesC = has a goal of 0 (is a slack variable), secondarily prefer variables with a larger goal (to be dependent variables, leaving the ones with small goals to be the independent ones)
-    qe.valueA=0.;
-    qe.valueB=0.;
-    qe.valueC=0.;
-    
-    const int c = qe.c;
-    qe.valueB = iia.col_rows[c].size();
-    int best_coeff=numeric_limits<int>::max();
-    for (int r : iia.col_rows[c])
-    {
-      const int c_coeff = abs(iia.rows[r].get_val(c));
-      if (c_coeff<best_coeff)
-      {
-        best_coeff=c_coeff;
-      }
-    }
-    qe.valueA=-best_coeff;
-    double glo, ghi;
-    iia.compute_tied_goals(c,glo,ghi);
-    qe.valueC = (glo==0. ? numeric_limits<int>::max()/2 : glo);
-  }
-  
   
   
   // For an explanation of Reduced Row Echelon Form, see
@@ -5043,7 +4584,7 @@ namespace IIA_Internal
     // set lower/upper bounds, etc., in sub-problem.
     for (int c = 0; c < sub_problem->lastCopiedCol; c++ )
     {
-      const auto pc = sub_problem->parent_col(c);
+      const auto pc = sub_problem->parentCols[c];
       sub_problem->col_lower_bounds[c] = col_lower_bounds[ pc ];
       sub_problem->col_upper_bounds[c] = col_upper_bounds[ pc ];
       sub_problem->col_type[c]         = col_type[pc];
@@ -5492,16 +5033,6 @@ namespace IIA_Internal
       return col_names[col].c_str();
     return nullptr;
   }
-  
-  int IncrementalIntervalAssignment::solve_sub_even()
-  {
-    // for variables that have not been assigned anything, assign goals.
-    // This happens for a single paving face, where the variables were not in any mapping subproblem and so are uninitialized
-    assign_vars_goals(false);
-    
-    return solve_sub();
-  }
-  
   
   int IncrementalIntervalAssignment::solve_sub()
   {
@@ -5954,7 +5485,7 @@ namespace IIA_Internal
     return (num_even || num_ineq || num_eq);
   }
   
-  bool IncrementalIntervalAssignment::solve(bool first_time, int scheme_flag)
+  bool IncrementalIntervalAssignment::solve(bool first_time)
   {
     result->info_message("Running incremental interval assignment.\n");
     
@@ -5966,10 +5497,6 @@ namespace IIA_Internal
       print_problem("full problem initial before setup");
       // print_problem_summary("full problem initial before setup");
     }
-    
-    const bool do_pave = scheme_flag >= 2;
-    const bool do_map = ( scheme_flag & 1 ) > 0;
-    int new_row_min = -1, new_row_max = -1;
     
     count_used_rows_cols();
     
@@ -5985,6 +5512,7 @@ namespace IIA_Internal
     if (solved_used_row<0)
       first_time=true;
     
+    int new_row_min = -1, new_row_max = -1;
     if (first_time)
     {
       // derived-class-specific initialization
@@ -5993,6 +5521,9 @@ namespace IIA_Internal
     }
     else // !first_time
     {
+      new_row_min = solved_used_row+1;
+      new_row_max = used_row;
+      
       // don't init solution, don't adjust tied variables
       should_adjust_solution_tied_variables = false;
       
@@ -6011,10 +5542,6 @@ namespace IIA_Internal
         }
       }
       // debug
-      
-      new_row_min = solved_used_row+1;
-      new_row_max = used_row;
-      
     } // !first_time
     
 
@@ -6036,7 +5563,8 @@ namespace IIA_Internal
     
     // solve mapping constraints, do these separately first for efficiency
     result->debug_message("Solving IIA mapping subproblems.\n");
-    bool success = solve_map(do_map, do_pave, new_row_min, new_row_max);
+    
+    bool success = solve_phase(true, new_row_min, new_row_max);
     
     if (result->log_debug)
     {
@@ -6047,19 +5575,12 @@ namespace IIA_Internal
     // if the mapping problems were feasible
     if ( success )
     {
-      if (!do_pave)
-      {
-        success = false;
-      }
-      else
-      {
-        result->debug_message("Solving IIA sum-even subproblems.\n");
-        // set should_adjust_solution_tied_variables to false
-        //   if it was true, then we already did the adjustments we should have when solving the mapping phase
-        //   if we adjust again, it may "undo" the mapping solution and cause problems.
-        should_adjust_solution_tied_variables = false;
-        success = solve_even(do_map, do_pave, new_row_min, new_row_max);
-      }
+      result->debug_message("Solving IIA sum-even subproblems.\n");
+      // set should_adjust_solution_tied_variables to false
+      //   if it was true, then we already did the adjustments we should have when solving the mapping phase
+      //   if we adjust again, it may "undo" the mapping solution and cause problems.
+      should_adjust_solution_tied_variables = false;
+      success = solve_phase(false, new_row_min, new_row_max);
     }
     if (success)
     {
@@ -6074,19 +5595,11 @@ namespace IIA_Internal
       result->debug_message("IIA sum-even-phase solver time = %f\n", even_time );
       const double total_time = setup_time+map_time+even_time;
       result->debug_message("Total IIA solve time = %f\n", total_time);
-    }
-    if (result->log_debug||result->log_debug)
-    {
-      if (result->log_debug)
-      {
-        print_problem("full problem solution");
-        print_solution("full problem solution");
-      }
-      else
-      {
-        print_problem_summary("full problem solution");
-        print_solution_summary("full problem solution");
-      }
+
+      print_problem("full problem solution");
+      print_solution("full problem solution");
+      // print_problem_summary("full problem solution");
+      // print_solution_summary("full problem solution");
     }
     // debug
     
@@ -6094,50 +5607,49 @@ namespace IIA_Internal
     return success;
   }
   
-  bool IncrementalIntervalAssignment::solve_map(int do_map, int do_pave, int row_min, int row_max )
+  
+  bool IncrementalIntervalAssignment::solve_phase(bool map_only, int row_min, int row_max )
   {
-    if (!do_map)
-    {
-      result->debug_message("\nSkipping interval matching 'map' phase.\n");
-      return true;
-    }
-    if (result->log_debug||result->log_debug)
-      result->info_message("\nSolving interval matching 'map' phase.\n");
-    
-    // common
     if (result->log_debug)
     {
+      if (map_only)
+        result->debug_message("\nSolving interval matching 'map' phase.\n");
+      else
+        result->debug_message("\nSolving interval matching 'even' phase.\n");
+
       set_problem_name( "big ip" );
       print_problem("\nEntire Interval Problem");
     }
     
-    // subdivide non-sum-even problems into independent components
+    // subdivide problems into independent components
     vector<IncrementalIntervalAssignment*> sub_problems;
-    subdivide_problem( sub_problems, false, row_min, row_max  );
+    subdivide_problem( sub_problems, !map_only, row_min, row_max  );
     const auto num_subs = sub_problems.size();
-    
+
+    // timing
     double solve_time=0.;
     CpuTimer solve_timer;
     
-    int success = true;
+    bool success = true;
     for ( size_t i=0; i < num_subs; ++i)
     {
       auto *sub_problem = sub_problems[i];
       
       if (result->log_debug)
       {
-        result->debug_message("Mapping subproblem %d of %d:\n", i+1, num_subs);
+        result->debug_message("Subproblem %d of %d:\n", i+1, num_subs);
         sub_problem->print_problem_summary( "subproblem " + to_string(i+1) + " of " + to_string(num_subs) );
       }
       
+      // In the second phase, for variables that have not been assigned anything, assign goals.
+      //   This happens for a single paving face, where the variables were not in any mapping subproblem and so are uninitialized
+      if (!map_only)
+        sub_problem->assign_vars_goals(false);
+
       if (sub_problem->solve_sub() != true)
       {
         success = false;
-        if (result->log_info)
-        {
-          result->warning_message("Mapping subproblem %d of %d was infeasible.\n",
-                                  num_subs - i, num_subs );
-        }
+        result->warning_message("Subproblem %d of %d was infeasible.\n", num_subs - i, num_subs );
       }
       
       // timing
@@ -6145,65 +5657,13 @@ namespace IIA_Internal
       {
         const auto solve_sub_time=solve_timer.cpu_secs();
         solve_time+=solve_sub_time;
-        result->info_message("Subproblem %d of %d size %d X %d time = %f (%f total)\n\n", num_subs-i, num_subs, sub_problem->number_of_rows, sub_problem->number_of_cols, solve_sub_time, solve_time);
-        // should really report used_row, used_col, and num_nonzeros,
+        result->info_message("Subproblem %d of %d size %d X %d time = %f (%f total)\n\n",
+                             num_subs-i, num_subs, sub_problem->used_row+1, sub_problem->used_col+1, solve_sub_time, solve_time);
       }
     }
+
     // gather sub-problem soutions back into this problem, copy solution to permanent storage
     if ( success )
-      gather_solutions( sub_problems );
-    delete_subproblems( sub_problems );
-    //  if (result->log_debug)
-    //  {
-    //    const auto cleanup_time=solve_timer.cpu_secs();
-    //    result->info_message("gather_solution and cleanup time %f\n",cleanup_time);
-    //  }
-    
-    return success;
-  }
-  
-  bool IncrementalIntervalAssignment::solve_even(int do_map, int do_pave, int row_min, int row_max )
-  {
-    if (!do_pave)
-    {
-      result->debug_message("Skipping interval matching sum-even phase.\n");
-      return true;
-    }
-    
-    if (result->log_debug)
-      result->info_message("Solving interval matching sum-even phase.\n");
-    
-    // subdivide based on sum-even constraints.
-    // Some equality constraints may not be used
-    vector<IncrementalIntervalAssignment*> sub_problems;
-    subdivide_problem( sub_problems, true, row_min, row_max );
-    const auto num_subs = sub_problems.size();
-    
-    int success = true;
-    for ( size_t i = 0; i < num_subs; ++i )
-    {
-      auto *sub_problem = sub_problems[i];
-      
-      if (result->log_debug)
-      {
-        result->debug_message("Sum-even (Paving) subproblem %d of %d:\n", i+1, num_subs);
-        sub_problem->print_problem_summary( "subproblem " + to_string(i+1) + " of " + to_string(num_subs) );
-      }
-      
-      if ( sub_problem->solve_sub_even() == false )
-      {
-        success = false;
-        if (result->log_info)
-        {
-          result->warning_message("Interval Matching subproblem is infeasible\n");
-          sub_problem->print_problem_summary("");
-        }
-      }
-      
-    }
-    
-    // gather sub-problem solutions back into this problem, copy solution to permanent storage
-    if (success)
       gather_solutions( sub_problems );
     delete_subproblems( sub_problems );
     
@@ -6722,15 +6182,6 @@ namespace IIA_Internal
       // result->info_message("\nDivided into %d subproblems.\n\n",sub_problems.size());
       result->debug_message("\nDivided into %d subproblems in time = %f\n\n", (int) sub_problems.size(), subdivide_time);
     }
-  }
-  
-  int IncrementalIntervalAssignment::add_dummy_variable(int num_variables,
-                                                        bool is_sum_even)
-  {
-    numDummies += num_variables;
-    if ( is_sum_even )
-      sumEvenDummies += num_variables;
-    return add_variable( num_variables );
   }
   
   void IncrementalIntervalAssignment::delete_subproblems( vector<IncrementalIntervalAssignment*> &sub_problems )

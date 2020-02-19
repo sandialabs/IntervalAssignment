@@ -202,12 +202,12 @@ namespace IIA
   bool IA::solve()
   {
     // works for re-solving, too
-    return ia->solve(false, 3);
+    return ia->solve(false);
   }
   bool IA::solve_feasible()
   {
     assert(0); // not implemented yet, we don't have the flags for skipping improvement
-    return ia->solve(true, 3);
+    return ia->solve(true);
   }
   bool IA::is_solved()
   {
