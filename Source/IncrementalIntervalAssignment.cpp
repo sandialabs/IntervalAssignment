@@ -32,7 +32,7 @@
 //  x get rid of compiler warnings, sign comparision and losing precision, etc.
 //  x auto resizing
 //   fill in test.cpp
-//   get rid of the +1 indexing when subdividing the problem.  check for inefficient array searches
+//  x get rid of the +1 indexing when subdividing the problem.  check for inefficient array searches
 //   beautify output
 //   collect public, private methods of IncrementalIntervalAssignment in header file
 //   organize like methods
@@ -5062,9 +5062,8 @@ namespace IIA_Internal
     target->used_row=((int)pRows->size())-1;
     target->used_col=((int)pCols->size())-1;
     
-    for (auto r1 : *pRows)
+    for (auto r : *pRows)
     {
-      auto r=r1-1;
       const auto t = row_map[r];
       assert(t>=0);
       assert(t<=target->used_row);
@@ -5084,9 +5083,8 @@ namespace IIA_Internal
       target->constraint[t]=constraint[r];
     }
     
-    for (auto c1 : *pCols)
+    for (auto c : *pCols)
     {
-      auto c=c1-1;
       assert(c>=0);
       const auto d = col_map[c];
       assert(d>=0);
@@ -5100,16 +5098,14 @@ namespace IIA_Internal
     
     if (names_exist())
     {
-      for (auto r1 : *pRows)
+      for (auto r : *pRows)
       {
-        auto r=r1-1;
         assert(r>=0);
         const auto t = row_map[r];
         target->row_names[t]=row_names[r];
       }
-      for (auto c1 : *pCols)
+      for (auto c : *pCols)
       {
-        auto c=c1-1;
         assert(c>=0);
         const auto d = col_map[c];
         assert(d>=0);
@@ -6102,7 +6098,7 @@ namespace IIA_Internal
   {
     if (!do_map)
     {
-      result->debug_message("\nSkipping interval matching 'map' phase.\n"); //zzyk or should we still check hardset?
+      result->debug_message("\nSkipping interval matching 'map' phase.\n");
       return true;
     }
     if (result->log_debug||result->log_debug)
@@ -6505,7 +6501,7 @@ namespace IIA_Internal
   {
     // add int_var_column to list - make sure not already in the list
     assert( !sub_col_array[ int_var_column ] );
-    sub_cols.push_back( int_var_column+1 );  // here is my extraneous +1, zzyk, do do, remove this
+    sub_cols.push_back( int_var_column );
     sub_col_array[ int_var_column ] = true;
     
     auto &non_zeros = col_rows[int_var_column];
@@ -6576,8 +6572,9 @@ namespace IIA_Internal
         }
         
         // actually add row to sub problem
-        if ( do_add ) {
-          sub_rows.push_back( row+1 );
+        if ( do_add )
+        {
+          sub_rows.push_back( row );
           sub_row_array[ row ] = true;
           
           // recursively add cross-columns
@@ -6605,7 +6602,7 @@ namespace IIA_Internal
     vector<int> seen_columns( number_of_cols, 0 );
     
     // map from row (col) of subproblem to row (col) of parent
-    vector <int> sub_rows, sub_cols; // these are indexed from 1, so 0 corresponds to not assigned
+    vector <int> sub_rows, sub_cols;
     
     // map from row (col) of this problem to row (col) of subproblem
     vector<int> row_map ( number_of_rows, -1 );
@@ -6632,7 +6629,7 @@ namespace IIA_Internal
         sub_cols.clear();
         recursively_add_edge( e, do_sum_even, sub_rows, sub_cols, sub_row_array, sub_col_array );
         
-        if (sub_rows.size() == 0)
+        if (sub_rows.empty())
           continue;
         
         sort(sub_rows.begin(),sub_rows.end());
@@ -6641,23 +6638,21 @@ namespace IIA_Internal
         // add in the seen columns, zero out the sub_row and sub_col arrays
         for ( auto col : sub_cols )
         {
-          //-1 because indexing starts at 1 not 0
-          seen_columns [ col-1 ] = 1;
-          sub_col_array[ col-1 ] = 0;
+          seen_columns [ col ] = 1;
+          sub_col_array[ col ] = 0;
         }
         
         for ( auto row : sub_rows )
         {
-          sub_row_array[row-1] = 0; //-1 because it starts at 1 not 0
+          sub_row_array[row] = 0;
         }
         
         // does the subproblem contain any of the new rows? If not, discard and continue
         if (row_subset)
         {
           bool subproblem_matters = false;
-          for (auto r : sub_rows)
+          for (auto row : sub_rows)
           {
-            const int row = r-1;
             if (row>=row_min && row<=row_max)
             {
               subproblem_matters=true;
@@ -6670,6 +6665,8 @@ namespace IIA_Internal
         
         // create new sub problem
         IncrementalIntervalAssignment *sub_problem = new_sub_problem();
+        sub_problems.push_back( sub_problem );
+        
         sub_problem->parentProblem = this;
         sub_problem->parentRows.resize( sub_rows.size() );
         sub_problem->parentCols.resize( sub_cols.size() );
@@ -6684,7 +6681,7 @@ namespace IIA_Internal
         // associate columns parent<-->sub problem, make map
         for ( int c = 0; c < sub_cols.size(); c++ )
         {
-          auto this_col = sub_cols[c] -1; //-1 because it starts at 1 not 0
+          auto this_col = sub_cols[c];
           column_map[ this_col ] = c;
           sub_problem->parentCols[c] = this_col;
         }
@@ -6692,7 +6689,7 @@ namespace IIA_Internal
         // set row map
         for ( int r = 0; r < sub_rows.size(); r++ )
         {
-          auto this_row = sub_rows[r]-1;  //-1 because it starts at 1 not 0
+          auto this_row = sub_rows[r];
           row_map[ this_row ] = r;
           sub_problem->parentRows[r] = this_row;
         }
@@ -6701,8 +6698,6 @@ namespace IIA_Internal
         copy_bounds_to_sub( sub_problem );
         
         copy_submatrix( &sub_rows, &sub_cols, row_map.data(), column_map.data(), sub_problem );
-        
-        sub_problems.push_back( sub_problem );
         
         // debug
         if (names_exist())
