@@ -68,15 +68,15 @@ namespace IIA
     ia->freeze_problem_size();
   }
   
-  std::pair<size_t, size_t> IA::size()
+  std::pair<size_t, size_t> IA::size() const
   {
     return std::make_pair(size_rows(), size_cols());
   }
-  size_t IA::size_rows()
+  size_t IA::size_rows() const
   {
     return ia->num_rows();
   }
-  size_t IA::size_cols()
+  size_t IA::size_cols() const
   {
     return ia->num_cols();
   }
@@ -199,15 +199,18 @@ namespace IIA
   }
   
   // solve
+  bool IA::solve_from_scratch()
+  {
+    return ia->solve(true, true);
+  }
   bool IA::solve()
   {
     // works for re-solving, too
-    return ia->solve(false);
+    return ia->solve(true, false);
   }
   bool IA::solve_feasible()
   {
-    assert(0); // not implemented yet, we don't have the flags for skipping improvement
-    return ia->solve(true);
+    return ia->solve(false, false);
   }
   bool IA::is_solved()
   {

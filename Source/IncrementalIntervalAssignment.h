@@ -58,9 +58,8 @@ namespace IIA_Internal
   };
   struct MatrixSparseInt
   {
-    vector<RowSparseInt> rows;
-    vector< vector<int> > col_rows;
-    
+    const IAResultImplementation *get_result() const {return result;}
+
     // nontrivial, adds up the number of non-zeros in all rows
     size_t num_nonzeros() const;
     
@@ -68,8 +67,9 @@ namespace IIA_Internal
     // Call once after rows are assigned and sorted
     void fill_in_cols_from_rows();
     
-    void print_matrix_summary(string prefix=string());
-    void print_matrix(string prefix=string());
+    void print_matrix_summary(string prefix=string()) const;
+    void print_matrix(string prefix=string()) const;
+    
     // s = u*s - v*r, with u and v chosen so that s[c]==0
     // standard call
     void matrix_row_us_minus_vr(int r, int s, int u, int v) { matrix_row_us_minus_vr(rows[r], rows[s], s, &col_rows, u, v); }
@@ -86,17 +86,22 @@ namespace IIA_Internal
     // and a col coefficient < max_coeff
     bool gaussian_elimination(int col, const BlockingCols &blocking_cols, int max_coeff, map<int,int> &improved_cols,
                               BlockingCols &all_blocking_cols, int &r, int &unblocked_row);
+
+  protected:
+    
     // modify row (by row operations) so the coefficient of col < max_coeff
     //   here r is the last row that gaussian elimination diagonalized
     bool reduce_coefficient(int row, int col, int r, int max_coeff);
+
     // return true if row has a blocking coefficient when trying to increment col,
     // could modify to return the blocking cols
     bool is_row_blocked(int row, int col, const BlockingCols &blocking_cols );
     static
     bool is_blocked(int v, pair<int,int> block); // true if v is outside (int,int) as an integer interval
                                                       // true if the coefficients for column col are such that their gcd >= max_coeff
+    
     bool coefficient_irreducible(int col, int max_coeff);
-  protected:
+    
     // unreduce c by row swaps and updating r; and remove c from all_blocking_cols
     void unreduce(int &r, int c, BlockingCols &all_blocking_cols);
     
@@ -110,12 +115,22 @@ namespace IIA_Internal
   private:
     // re-used workspace for matrix_row_us_minus_vr
     vector<int> new_cols, new_vals;
-  protected:
+    
+  protected: // data
     vector<int> kill_rows;
     
+  public: // data,
     IAResultImplementation *result;
-    void print_map(const BlockingCols &amap);
     
+    // public so IncrementalIntervalAssignment methods can access and manipulate them directly for nullspace matrices, etc.
+    vector<RowSparseInt> rows;
+    vector< vector<int> > col_rows;
+
+    
+  protected: // methods
+
+    void print_map(const BlockingCols &amap) const;
+
   public:
     
     // swap rows, update columns
@@ -157,27 +172,20 @@ namespace IIA_Internal
   protected MatrixSparseInt, protected EqualsB
   {
     
-  protected:
-    // return true if a row is something like "0 = 3" or some other obviously bad constraint
-    bool infeasible_constraints();
-    void add_more_columns();
-    void add_more_rows();
-
-    void count_used_rows_cols();
-    
-
   public: // interface
     
     IncrementalIntervalAssignment( IAResultImplementation *result_ptr );
     virtual ~IncrementalIntervalAssignment();
     
+    const IAResultImplementation *get_result() const {return result;}
+
     // solve interval assignment Mx = B for x
     //   also works to re-solve a problem after adding new rows.
     //   first_time is just a hint.
-    bool solve( bool first_time = true );
+    bool solve( bool do_improve = true, bool first_time = true );
     
-    int get_is_solved()    {return hasBeenSolved;}
-    void set_is_unsolved()        {hasBeenSolved=false;}
+    int get_is_solved()    const {return hasBeenSolved;}
+    void set_is_unsolved()              {hasBeenSolved=false;}
 
     // problem size
     int num_rows() const {return number_of_rows;}
@@ -198,9 +206,9 @@ namespace IIA_Internal
     int next_intvar();
 
     // constraint matrix values Mx = B
-    int    get_M_unsorted( int row, int col );
-    int    get_M( int row, int col );  // caution: relies on entries being sorted, be careful when we allow queries
-    void   get_M( int row, const vector<int> *&cols, const vector<int> *&vals );
+    int    get_M_unsorted( int row, int col ) const;
+    int    get_M( int row, int col ) const;  // caution: relies on entries being sorted, be careful when we allow queries
+    void   get_M( int row, const vector<int> *&cols, const vector<int> *&vals ) const;
     void   set_M( int row, int col, int val ); // doesn't rely on entries being sorted, may be slow
     void   set_M( int row,  vector<int> &cols, vector<int> &vals ); // modifes rows and cols
     void clear_M(int row); // clear the entries of this row. col_rows is invalid
@@ -210,11 +218,11 @@ namespace IIA_Internal
     ConstraintType get_constraint(int row) {return constraint[row];}
 
     // right hand side
-    int  get_B( int row );
+    int  get_B( int row ) const;
     void set_B( int row, int val );
     
     // ideal value for each variable
-    double  get_goal(int c); // no goal is internally represented by 0.
+    double  get_goal(int c) const; // no goal is internally represented by 0.
     double  set_goal(int c, double goal);
     void set_no_goal(int c); // dummy variables have no goal
 
@@ -228,7 +236,7 @@ namespace IIA_Internal
     //   set_upper( c, numeric_limits<int>::max() );
 
     // x
-    int get_solution( int col )             { return col_solution[col]; }
+    int get_solution( int col )       const { return col_solution[col]; }
     const vector<int> &get_solution() const { return col_solution; }
     
     // Add a new row after the problem has already been solved.
@@ -239,21 +247,21 @@ namespace IIA_Internal
     int new_col(int num_cols=1);
 
     // print and debug
-    void print_problem_summary(string prefix);
-    void print_problem(string prefix);
-    void print_problem(string prefix, const vector<int> &col_order);
-    void print_solution(string prefix);
-    void print_solution_row(int r, string prefix="");
-    void print_solution_col(int c);
-    void print_solution_summary(string prefix);
-    void print();
+    void print_problem_summary(string prefix) const;
+    void print_problem(string prefix) const;
+    void print_problem(string prefix, const vector<int> &col_order) const;
+    void print_solution(string prefix) const;
+    void print_solution_row(int r, string prefix="") const;
+    void print_solution_col(int c) const;
+    void print_solution_summary(string prefix) const;
+    void print() const;
     
     void set_problem_name( const char *problem_name );
     void set_row_name(int row, const char *name);
     void set_col_name(int col, const char *name);
-    const char *get_problem_name();
-    const char *get_row_name(int row);
-    const char *get_col_name(int col);
+    const char *get_problem_name() const;
+    const char *get_row_name(int row) const;
+    const char *get_col_name(int col) const;
 
   protected: // data
     
@@ -307,7 +315,7 @@ namespace IIA_Internal
     //   map means solve everything except the sum-even constraints (possibly return a non-integer solution)
     //   even means solve all constraints, return an integer solution
     //   if row_min and row_max are passed in, then we only try to solve the subproblems involving those rows and ignore ones not containing those rows.
-    bool solve_phase( bool map_only, int row_min, int row_max);
+    bool solve_phase( bool map_only_phase, bool do_improve, int row_min, int row_max);
     
 
     void recursively_add_edge( int int_var_column,
@@ -326,9 +334,9 @@ namespace IIA_Internal
     //- and are not sorted. Both structures are around to keep the
     //- running time proportional to subproblem size.
     
-    //   if row_min and row_max are passed in, then we generate subproblems involving those rows and ignore ones not containing those rows.
-    void subdivide_problem( vector<IncrementalIntervalAssignment*> &sub_problems,
-                           bool do_sum_even = false, int row_min = -1, int row_max = -1 );
+    //   if row_min and row_max are >-1, then we generate subproblems involving those rows and ignore ones not containing those rows.
+    void subdivide_problem(vector<IncrementalIntervalAssignment*> &sub_problems,
+                           bool do_sum_even, int row_min, int row_max );
     //- Subdivide the equality (sum-even) constraints of this IncrementalIntervalAssignment into
     //- independent sub-problems, if do_sum_even is false (true).
     
@@ -339,17 +347,17 @@ namespace IIA_Internal
     void gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems );
     void gather_solution( IncrementalIntervalAssignment* sub_problem );
     
-    int solve_sub();
+    int solve_sub(bool do_improve);
     void copy_submatrix(vector <int> *rows, vector <int> *columns,
-                        int *row_map, int *column_map, IncrementalIntervalAssignment *target );
-    void copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem );
+                        int *row_map, int *column_map, IncrementalIntervalAssignment *target ) const;
+    void copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem ) const;
     
     // force equality row r to be satisfied by introducing a slack variable r
     void force_satisfied_with_slack(int r);
     
     // return the non-zeros values of the matrix in column c
     //   we don't store these, so lookup takes a little bit of time
-    vector<int> column_coeffs(int c);
+    vector<int> column_coeffs(int c) const;
     
     // build the columns from the row data.
     // Call once after the problem is fixed and rows are sorted
@@ -359,8 +367,8 @@ namespace IIA_Internal
     //   skips rows <row_start
     void sort_rows(int row_start);
     
-    void print_row_iia(size_t r);
-    void print_col_iia(size_t c);
+    void print_row_iia(size_t r) const;
+    void print_col_iia(size_t c) const;
     
     // HNF Hermite Normal Form. Like RREF but using column operations. For solving initial constraints
     // This is A.  AU = (B 0) for column operations U.
@@ -403,7 +411,7 @@ namespace IIA_Internal
   
     // do the remaining stuff that the matrix versions don't
     void multiply_names_rhs(int r, int s, int u, int v);
-   
+    
     // The three main methods of the overall solve are
     //   satisfy_constraints:  initial feasible solution satisfying the constraints, Ax=b
     //   satisfy_bounds:       improve initial feasible solution so that all the variables are within their allowed ranges x \in [lo,hi]
@@ -413,9 +421,12 @@ namespace IIA_Internal
     
     //*** start: the following only work correctly after we've called rref
     
+    // return true if a row is something like "0 = 3" or some other obviously bad constraint
+    bool infeasible_constraints() const;
+
     // return true if calculated solution actually satisfies the constraints
     bool verify_constraints_satisfied(bool print=false);
-    
+
     // find initial feasible solution, satisfying constraints
     // return true if successful
     bool satisfy_constaints(const vector<int>&cols_dep,
@@ -444,7 +455,7 @@ namespace IIA_Internal
     void assign_vars_goals(bool overwrite);
     // assign the dummy variables the closest value that would make the constraints feasible
     // returns true if the assignment is feasible
-    bool assign_dummies_feasible();
+    void assign_dummies_feasible();
     // adjust independent vars to try to make the dependent ones feasible
     bool adjust_independent_vars(vector<int>&cols_fail);
     // if the variables weren't assignable as integers, then return false and save the unsatisfied rows in rows_fail
@@ -488,6 +499,11 @@ namespace IIA_Internal
     // assign some values to variables before we truly solve
     void solution_init();
     
+    void count_used_rows_cols();
+
+    void add_more_columns();
+    void add_more_rows();
+    
     //- returns the index = column of the first variable/constraint, the rest are consecutive.
     int add_variable  ( int num_variables );
     int add_constraint( int num_constraints );
@@ -524,14 +540,14 @@ namespace IIA_Internal
     void assign_tied_variables();
     // checks if the variable is a tied-to variable, and uses the datum if so.
     // returns true if goal_lowest != goal_highest
-    bool compute_tied_goals(int c, double &goal_lowest, double &goal_highest);
+    bool compute_tied_goals(int c, double &goal_lowest, double &goal_highest) const;
     //== tied variables end
 
     // amount we need to change the intervals to make it satisfy its variable bounds.
     // + = need to increase, - = need to decrease. Uses passed in value v rather than IIA's solution value
-    int compute_out_of_bounds(int c, int v);
+    int compute_out_of_bounds(int c, int v) const;
     
-    bool verify_full_solution(bool print_unsatisfied_constraints);
+    bool verify_full_solution(bool print_unsatisfied_constraints, bool pretend_solved = false) const;
     
     // increase the solution by dx times R. Returns true if the solution is (still) within bounds
     bool increment_solution(RowSparseInt &R, int dx);
@@ -581,6 +597,7 @@ namespace IIA_Internal
                  const vector<int> &qcol);
     
   public:
+    // priorities for selecting variables to change.
     friend class SetValuesFn;
     friend class SetValuesBounds;
     friend class SetValuesRatioR;
@@ -588,8 +605,6 @@ namespace IIA_Internal
     friend class SetValuesOneCoeff;
     friend class SetValuesNumCoeff;
     friend class SetValuesCoeffRowsGoal;
-    friend class QElement;
-    friend class QWithReplacement;
   };
   
   inline
@@ -606,7 +621,7 @@ namespace IIA_Internal
   }
   
   inline
-  int IncrementalIntervalAssignment::get_B( int row )
+  int IncrementalIntervalAssignment::get_B( int row ) const
   {
     return rhs[row];
   }
@@ -618,7 +633,7 @@ namespace IIA_Internal
   }
   
   inline
-  double IncrementalIntervalAssignment::get_goal(int c)
+  double IncrementalIntervalAssignment::get_goal(int c) const
   {
     return goals[c];
   }
@@ -630,13 +645,13 @@ namespace IIA_Internal
   }
   
   inline
-  int IncrementalIntervalAssignment::get_M  ( int row, int col )
+  int IncrementalIntervalAssignment::get_M  ( int row, int col ) const
   {
     return rows[row].get_val(col);
   }
   
   inline
-  void IncrementalIntervalAssignment::get_M( int row, const vector<int> *&cols, const vector<int> *&vals )
+  void IncrementalIntervalAssignment::get_M( int row, const vector<int> *&cols, const vector<int> *&vals ) const
   {
     cols = &rows[row].cols;
     vals = &rows[row].vals;

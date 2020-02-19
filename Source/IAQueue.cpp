@@ -13,7 +13,7 @@ namespace  IIA_Internal
   using std::swap;
   using std::min;
   
-  bool SetValuesFn::update_values(IncrementalIntervalAssignment &iia, QElement &qe)
+  bool SetValuesFn::update_values(const IncrementalIntervalAssignment &iia, QElement &qe)
   {
     // no solution previously?
     if (!qe.solution_set)
@@ -34,14 +34,14 @@ namespace  IIA_Internal
     return false;
   }
   
-  void SetValuesFn::set_values(IncrementalIntervalAssignment &iia, QElement &qe, int solution)
+  void SetValuesFn::set_values(const IncrementalIntervalAssignment &iia, QElement &qe, int solution)
   {
     qe.solution=solution;
     qe.solution_set=true;
     set_values_implementation(iia,qe);
   }
   
-  void SetValuesFn::set_values(IncrementalIntervalAssignment &iia, QElement &qe)
+  void SetValuesFn::set_values(const IncrementalIntervalAssignment &iia, QElement &qe)
   {
     qe.solution=iia.get_solution(qe.c);
     qe.solution_set=true;
@@ -49,7 +49,7 @@ namespace  IIA_Internal
   }
   
   
-  void SetValuesBounds::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
+  void SetValuesBounds::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
     if (qe.c>-1)
     {
@@ -80,7 +80,7 @@ namespace  IIA_Internal
     }
   }
   
-  void SetValuesRatioR::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
+  void SetValuesRatioR::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
     auto &c=qe.c;
     if (c>-1)
@@ -110,7 +110,7 @@ namespace  IIA_Internal
     }
   }
   
-  void SetValuesRatioR::set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe )
+  void SetValuesRatioR::set_values_goal(const IncrementalIntervalAssignment &iia, double g, QElement &qe )
   {
     assert(qe.solution_set);
     if (g==0.) // its a "don't care" dummy variable
@@ -175,7 +175,7 @@ namespace  IIA_Internal
     }
   }
   
-  void SetValuesRatio::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
+  void SetValuesRatio::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
     auto &c=qe.c;
     if (c>-1)
@@ -205,7 +205,7 @@ namespace  IIA_Internal
     }
   }
   
-  void SetValuesRatio::set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe )
+  void SetValuesRatio::set_values_goal(const IncrementalIntervalAssignment &iia, double g, QElement &qe )
   {
     assert(qe.solution_set);
     if (g==0.) // its a "don't care" dummy variable
@@ -254,7 +254,7 @@ namespace  IIA_Internal
   }
   
   
-  void SetValuesOneCoeff::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
+  void SetValuesOneCoeff::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
     // valuesA = has only one coefficient, of value 1
     // valuesB = has a goal of 0 (is a slack variable)
@@ -280,7 +280,7 @@ namespace  IIA_Internal
     }
   }
   
-  void SetValuesNumCoeff::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
+  void SetValuesNumCoeff::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
     // valuesA = -number of coefficients
     // valuesB = -smallest coefficient magnitude
@@ -331,7 +331,7 @@ namespace  IIA_Internal
     }
   }
   
-  void SetValuesCoeffRowsGoal::set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe )
+  void SetValuesCoeffRowsGoal::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
     // valuesA = value of smallest coefficient
     // valuesB = number of rows it appears in
@@ -360,7 +360,7 @@ namespace  IIA_Internal
   
   bool QWithReplacement::tip_top( QElement &t)
   {
-    iia->result->debug_message("Q size %d ", (int) Q.size());
+    iia->get_result()->debug_message("Q size %d ", (int) Q.size());
     if (Q.empty())
     {
       t = QElement();
@@ -373,19 +373,19 @@ namespace  IIA_Internal
     Q.erase(Qback);
     elements.erase(t.c);
     
-    if (iia->result->log_debug)
+    if (iia->get_result()->log_debug)
     {
-      iia->result->info_message("tip top ");
-      t.print(iia);
+      iia->get_result()->info_message("tip top ");
+      t.print(iia->get_result());
     }
     return false;
   }
   
   void QWithReplacement::update(const vector<int> &cols)
   {
-    if (/* DISABLES CODE */ (0) && iia->result->log_debug)
+    if (/* DISABLES CODE */ (0) && iia->get_result()->log_debug)
     {
-      iia->result->info_message("Q before update ");
+      iia->get_result()->info_message("Q before update ");
       print();
     }
     
@@ -420,36 +420,36 @@ namespace  IIA_Internal
       }
     }
     
-    if (/* DISABLES CODE */ (0) && iia->result->log_debug)
+    if (/* DISABLES CODE */ (0) && iia->get_result()->log_debug)
     {
-      iia->result->info_message("Q after update ");
+      iia->get_result()->info_message("Q after update ");
       print();
     }
     
   }
   
-  void QElement::print(IncrementalIntervalAssignment *iia)
+  void QElement::print(const IAResultImplementation *result) const
   {
-    iia->result->info_message("qe c:%d ",c);
+    result->info_message("qe c:%d ",c);
     if (!solution_set)
-      iia->result->info_message("unset");
+      result->info_message("unset");
     else
-      iia->result->info_message("sol:%d",solution);
-    iia->result->info_message(" A:%f B:%f C:%f\n",valueA,valueB,valueC);
+      result->info_message("sol:%d",solution);
+    result->info_message(" A:%f B:%f C:%f\n",valueA,valueB,valueC);
   }
   
-  void QWithReplacement::print()
+  void QWithReplacement::print() const
   {
-    iia->result->info_message("QWithReplacement %lu elements, threshold %f\n", (unsigned long) elements.size(), threshold);
+    iia->get_result()->info_message("QWithReplacement %lu elements, threshold %f\n", (unsigned long) elements.size(), threshold);
     //  for (auto it : elements)
     //  {
     //    result->info_message("%d ", it.first);
     //    it.second.print();
     //  }
-    iia->result->info_message("Q %lu set\n", (unsigned long) Q.size() );
+    iia->get_result()->info_message("Q %lu set\n", (unsigned long) Q.size() );
     for (auto e : Q)
     {
-      e.print(iia);
+      e.print(iia->get_result());
     }
   }
   

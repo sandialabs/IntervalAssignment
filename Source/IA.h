@@ -45,9 +45,9 @@ namespace IIA
     void resize_rows(size_t nrows);
     void resize_cols(size_t ncols);
     
-    std::pair<size_t, size_t> size();
-    size_t size_rows();
-    size_t size_cols();
+    std::pair<size_t, size_t> size() const;
+    size_t size_rows() const;
+    size_t size_cols() const;
     
     //== Define Problem
     
@@ -101,8 +101,9 @@ namespace IIA
     //== Solve
     
     // sets x
-    bool solve();
-    bool solve_feasible(); // solves constraints and bounds only, ignores goals.
+    bool solve_from_scratch(); // solves, overwriting any prior solution
+    bool solve();              // solves, if there is a prior solution, we continue from there
+    bool solve_feasible();     // solves constraints and bounds only, ignores goals.
     bool is_solved();
     
     // If you solve the problem, then add rows, the current solution is not thrown out.

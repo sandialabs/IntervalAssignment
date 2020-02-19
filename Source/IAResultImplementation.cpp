@@ -19,7 +19,7 @@ namespace IIA_Internal
   }
   
   
-  void IAResultImplementation::info_message(const char* format, ...)
+  void IAResultImplementation::info_message(const char* format, ...) const
   {
     if (!message_log || !log_info)
       return;
@@ -30,7 +30,7 @@ namespace IIA_Internal
     va_end(args);
   }
   
-  void IAResultImplementation::warning_message(const char* format, ...)
+  void IAResultImplementation::warning_message(const char* format, ...) const
   {
     if (!message_log || !log_warning)
       return;
@@ -41,7 +41,7 @@ namespace IIA_Internal
     va_end(args);
   }
   
-  void IAResultImplementation::error_message(const char* format, ...)
+  void IAResultImplementation::error_message(const char* format, ...) const
   {
     if (!message_log || !log_error)
       return;
@@ -52,7 +52,7 @@ namespace IIA_Internal
     va_end(args);
   }
   
-  void IAResultImplementation::debug_message(const char* format, ...)
+  void IAResultImplementation::debug_message(const char* format, ...) const
   {
     if (!message_log || !log_debug)
       return;
@@ -63,7 +63,7 @@ namespace IIA_Internal
     va_end(args);
   }
   
-  void IAResultImplementation::log_message(MessageType message_type, const std::string &prefix, const char* format, va_list args)
+  void IAResultImplementation::log_message(MessageType message_type, const std::string &prefix, const char* format, va_list args) const
   {
     if (!message_log)
       return;

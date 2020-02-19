@@ -26,8 +26,9 @@
 //  x verify_full_solution, get rid of refentities
 //  x-skipped, leave it for debugging get rid of names?! or convert
 //  x figure out when to sort rows, perhaps a flag as to whether they've been sorted or not
+//  x clean up Queue friend issues
 //   method to copy a problem, not the solution
-//   IA::solve_feasible, skip improvement phase
+//  x IA::solve_feasible, skip improvement phase
 //   figure out when to reset the solved flag,
 //   use a tool to determine code that isn't used and delete it
 //  x fill in public interface methods
@@ -221,14 +222,13 @@ namespace IIA_Internal
     }
   }
   
-  bool IncrementalIntervalAssignment::assign_dummies_feasible()
+  void IncrementalIntervalAssignment::assign_dummies_feasible()
   {
     // solution_init has already been called
     // already assigned intVars to lround(goals), or to some other value from a prior mapping subproblem
     // get dummies close to what makes sense for the goals
     // i.e. initilize sum-even variables to row-sum / 2
     
-    bool feasible=true;
     for (int c = 0; c <= used_col; ++c)
     {
       if (col_type[c]!=INT_VAR)
@@ -247,40 +247,11 @@ namespace IIA_Internal
         {
           // round col_solution up, as this causes less issues with lower bounds
           ++col_solution[c];
-          feasible=false;
-        }
-        
-        // we don't support more than one dummy in a row currently
-        // this regularly happens after RREF, but shouldn't happen before RREF
-        if (result->log_debug)
-        {
-          for (auto col : rows[r].cols)
-          {
-            if ((col!=c && col_type[c]!=INT_VAR))
-            {
-              result->error_message("IIA: more than one dummy variable in a constraint row is not supported.\n");
-              print_row_iia(r);
-            }
-          }
-        }
-        
-        // if there are other rows with the dummy variable, did we satisfy them?
-        if (feasible)
-        {
-          for (size_t i = 1; i < dummy_rows.size(); ++i)
-          {
-            int r = dummy_rows[i];
-            int sum = row_sum(r);
-            if (sum != 0)
-            {
-              feasible=false;
-              break;
-            }
-          }
+          // if there is more than one dummy variable with different coefficients, we could take a second pass to try to satisfy it
+          //   fill in if it helps a customer problem
         }
       }
     }
-    return feasible;
   }
   
   void IncrementalIntervalAssignment::relevant_rows_cols(const vector<int>&seed_cols,
@@ -563,7 +534,7 @@ namespace IIA_Internal
     }
   }
   
-  int IncrementalIntervalAssignment::compute_out_of_bounds(int c, int v)
+  int IncrementalIntervalAssignment::compute_out_of_bounds(int c, int v) const
   {
     // int v = col_solution[c];
     if (v<col_lower_bounds[c])
@@ -577,11 +548,11 @@ namespace IIA_Internal
     return 0;
   }
   
-  bool IncrementalIntervalAssignment::compute_tied_goals(int c, double &goal_lowest, double &goal_highest)
+  bool IncrementalIntervalAssignment::compute_tied_goals(int c, double &goal_lowest, double &goal_highest) const
   {
     if (has_tied_variables && tied_variables[c].size()>1)
     {
-      auto &dt = tied_data[c];
+      auto &dt = tied_data.at(c);
       goal_lowest=dt.goal_lo;
       goal_highest=dt.goal_hi;
       return true; // (goal_highest != goal_lowest);
@@ -614,7 +585,7 @@ namespace IIA_Internal
     return goal;
   }
   
-  bool IncrementalIntervalAssignment::infeasible_constraints()
+  bool IncrementalIntervalAssignment::infeasible_constraints() const
   {
     bool rc=false;
     for (int r = 0; r <= used_row; ++r)
@@ -659,7 +630,7 @@ namespace IIA_Internal
         {
           int c = row.cols[0];
           int s = b / v;
-          col_solution[c]=s;
+          // col_solution[c]=s;
           // assume constraint is equality, we're inside IncrementalIntervalAssignment after all
           
           // only solution is below lower bound
@@ -3141,7 +3112,7 @@ namespace IIA_Internal
     }
   }
   
-  vector<int> IncrementalIntervalAssignment::column_coeffs(int c)
+  vector<int> IncrementalIntervalAssignment::column_coeffs(int c) const
   {
     vector<int> vals;
     auto &col = col_rows[c];
@@ -4579,7 +4550,7 @@ namespace IIA_Internal
     return true;
   }
   
-  void IncrementalIntervalAssignment::copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem )
+  void IncrementalIntervalAssignment::copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem ) const
   {
     // set lower/upper bounds, etc., in sub-problem.
     for (int c = 0; c < sub_problem->lastCopiedCol; c++ )
@@ -4594,7 +4565,7 @@ namespace IIA_Internal
   }
   
   void IncrementalIntervalAssignment::copy_submatrix(vector <int> *pRows, vector <int> *pCols,
-                                                     int *row_map, int *col_map, IncrementalIntervalAssignment *target )
+                                                     int *row_map, int *col_map, IncrementalIntervalAssignment *target ) const
   {
     // for ( r : rows )
     //   target_row = row_map[r]
@@ -4932,7 +4903,7 @@ namespace IIA_Internal
       return vals[ found_col-cols.begin() ];
     return 0;
   }
-  int IncrementalIntervalAssignment::get_M_unsorted  ( int row, int col )
+  int IncrementalIntervalAssignment::get_M_unsorted  ( int row, int col ) const
   {
     auto &r = rows[row];
     for (size_t i = 0; i < r.cols.size(); ++i)
@@ -5001,7 +4972,7 @@ namespace IIA_Internal
     problem_name=name;
   }
   
-  const char *IncrementalIntervalAssignment::get_problem_name()
+  const char *IncrementalIntervalAssignment::get_problem_name() const
   {
     return problem_name.c_str();
   }
@@ -5013,7 +4984,7 @@ namespace IIA_Internal
       row_names[row]=string(name);
     }
   }
-  const char *IncrementalIntervalAssignment::get_row_name(int row)
+  const char *IncrementalIntervalAssignment::get_row_name(int row) const
   {
     if (names_exist())
       return row_names[row].c_str();
@@ -5027,16 +4998,16 @@ namespace IIA_Internal
       col_names[col]=string(name);
   }
   
-  const char *IncrementalIntervalAssignment::get_col_name(int col)
+  const char *IncrementalIntervalAssignment::get_col_name(int col) const
   {
     if (names_exist())
       return col_names[col].c_str();
     return nullptr;
   }
   
-  int IncrementalIntervalAssignment::solve_sub()
+  int IncrementalIntervalAssignment::solve_sub(bool do_improve)
   {
-    // solve a mapping subproblem
+    // solve a subproblem
     //   get row echelon form
     //   find nullspace from row echelon form
     //   get initial feasible solution
@@ -5216,9 +5187,9 @@ namespace IIA_Internal
     const bool in_bounds = satisfy_bounds(M, MaxMrow);
     
     // debug
-    if (result->log_debug) print_solution("solve_sub constraints + bounds solution ");
     if (result->log_debug)
     {
+      print_solution("solve_sub constraints + bounds solution ");
       time_bound = timer.cpu_secs();
       result->info_message("feasible bounds solution time %f\n",time_bound);
     }
@@ -5232,30 +5203,33 @@ namespace IIA_Internal
     
     hasBeenSolved=true; // feasible solution
     
-    // redo rref and nullspace if helpful
-    //   variables with non-1 coefficients, such as sum-even variables with a coeff of 2, were chosen as independent vars above.
-    //   however, for optimization, we want them to be *depended* variables
-    
-    MatrixSparseInt N(result);
-    improve_solution(M, MaxMrow, N);
-    
-    // debug
-    if (result->log_debug)
+    if (do_improve)
     {
-      time_opt = timer.cpu_secs();
-      result->info_message("optimize quality time %f\n",time_opt);
+      // redo rref and nullspace if helpful
+      //   variables with non-1 coefficients, such as sum-even variables with a coeff of 2, were chosen as independent vars above.
+      //   however, for optimization, we want them to be *depended* variables
+      
+      MatrixSparseInt N(result);
+      improve_solution(M, MaxMrow, N);
+      
+      // debug
+      if (result->log_debug)
+      {
+        time_opt = timer.cpu_secs();
+        result->info_message("optimize quality time %f\n",time_opt);
+      }
+      // debug
+      
+      fine_tune(M,N);
+      
+      // debug
+      if (result->log_debug)
+      {
+        time_tune = timer.cpu_secs();
+        result->info_message("fine tune quality time %f\n",time_tune);
+      }
+      // debug
     }
-    // debug
-    
-    fine_tune(M,N);
-    
-    // debug
-    if (result->log_debug)
-    {
-      time_tune = timer.cpu_secs();
-      result->info_message("fine tune quality time %f\n",time_tune);
-    }
-    // debug
     
     if (has_tied_variables)
     {
@@ -5485,7 +5459,7 @@ namespace IIA_Internal
     return (num_even || num_ineq || num_eq);
   }
   
-  bool IncrementalIntervalAssignment::solve(bool first_time)
+  bool IncrementalIntervalAssignment::solve(bool do_improve, bool first_time)
   {
     result->info_message("Running incremental interval assignment.\n");
     
@@ -5564,7 +5538,7 @@ namespace IIA_Internal
     // solve mapping constraints, do these separately first for efficiency
     result->debug_message("Solving IIA mapping subproblems.\n");
     
-    bool success = solve_phase(true, new_row_min, new_row_max);
+    bool success = solve_phase(true, do_improve, new_row_min, new_row_max);
     
     if (result->log_debug)
     {
@@ -5580,14 +5554,15 @@ namespace IIA_Internal
       //   if it was true, then we already did the adjustments we should have when solving the mapping phase
       //   if we adjust again, it may "undo" the mapping solution and cause problems.
       should_adjust_solution_tied_variables = false;
-      success = solve_phase(false, new_row_min, new_row_max);
+      success = solve_phase(false, do_improve, new_row_min, new_row_max);
     }
     if (success)
     {
       hasBeenSolved=true;
       solved_used_row=used_row;
     }
-    
+    result->solved = success;
+
     // debug & diagnositcs
     if (result->log_debug)
     {
@@ -5603,16 +5578,15 @@ namespace IIA_Internal
     }
     // debug
     
-    result->solved = success;
     return success;
   }
   
   
-  bool IncrementalIntervalAssignment::solve_phase(bool map_only, int row_min, int row_max )
+  bool IncrementalIntervalAssignment::solve_phase(bool map_only_phase, bool do_improve, int row_min, int row_max )
   {
     if (result->log_debug)
     {
-      if (map_only)
+      if (map_only_phase)
         result->debug_message("\nSolving interval matching 'map' phase.\n");
       else
         result->debug_message("\nSolving interval matching 'even' phase.\n");
@@ -5623,7 +5597,7 @@ namespace IIA_Internal
     
     // subdivide problems into independent components
     vector<IncrementalIntervalAssignment*> sub_problems;
-    subdivide_problem( sub_problems, !map_only, row_min, row_max  );
+    subdivide_problem( sub_problems, !map_only_phase, row_min, row_max  );
     const auto num_subs = sub_problems.size();
 
     // timing
@@ -5643,10 +5617,10 @@ namespace IIA_Internal
       
       // In the second phase, for variables that have not been assigned anything, assign goals.
       //   This happens for a single paving face, where the variables were not in any mapping subproblem and so are uninitialized
-      if (!map_only)
+      if (!map_only_phase)
         sub_problem->assign_vars_goals(false);
 
-      if (sub_problem->solve_sub() != true)
+      if (!sub_problem->solve_sub(do_improve))
       {
         success = false;
         result->warning_message("Subproblem %d of %d was infeasible.\n", num_subs - i, num_subs );
@@ -5674,7 +5648,7 @@ namespace IIA_Internal
   {
   }
   
-  void IncrementalIntervalAssignment::print_row_iia(size_t r)
+  void IncrementalIntervalAssignment::print_row_iia(size_t r) const
   {
     if (names_exist())
       result->info_message("  %d %s: ", (int) r, row_names[r].c_str());
@@ -5717,7 +5691,7 @@ namespace IIA_Internal
     result->info_message(" %d\n", rhs[r]);
   }
   
-  void IncrementalIntervalAssignment::print_col_iia(size_t c)
+  void IncrementalIntervalAssignment::print_col_iia(size_t c) const
   {
     // col indices
     if (names_exist())
@@ -5741,7 +5715,7 @@ namespace IIA_Internal
     return non_zeros;
   }
   
-  void IncrementalIntervalAssignment::print_problem_summary(string prefix)
+  void IncrementalIntervalAssignment::print_problem_summary(string prefix) const
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -5753,10 +5727,9 @@ namespace IIA_Internal
                          number_of_rows, used_row,
                          number_of_cols, used_col, (unsigned long) num_nonzeros());
     result->info_message(" %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
-    // result->info_message("stubbed out\n"); return; // zzyk
   }
   
-  void IncrementalIntervalAssignment::print_problem(string prefix)
+  void IncrementalIntervalAssignment::print_problem(string prefix) const
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -5770,7 +5743,6 @@ namespace IIA_Internal
                          number_of_cols, used_col);
     result->info_message("  %lu non-zeros\n", (unsigned long)num_nonzeros());
     result->info_message("  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
-    // result->info_message("stubbed out\n"); return; // zzyk
     
     // print my matrix
     result->info_message("Rows\n");
@@ -5817,7 +5789,7 @@ namespace IIA_Internal
     result->info_message("end IA problem\n\n");
   }
   
-  void IncrementalIntervalAssignment::print_problem(string prefix, const vector<int> &col_order)
+  void IncrementalIntervalAssignment::print_problem(string prefix, const vector<int> &col_order) const
   {
     print_problem(prefix);
     result->info_message("^^^^Above columns (variables) are permuted into this order: ");
@@ -5828,7 +5800,7 @@ namespace IIA_Internal
     // auto copy = *this;
   }
   
-  void IncrementalIntervalAssignment::print_solution_summary(string prefix)
+  void IncrementalIntervalAssignment::print_solution_summary(string prefix) const
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -5837,14 +5809,11 @@ namespace IIA_Internal
     result->info_message("IIA solution summary %s\n",
                          problem_name.c_str());
     result->info_message("  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
-    bool force_been_solved = true;
-    swap(force_been_solved,hasBeenSolved);
-    result->info_message("Solution is %s.\n", (verify_full_solution(true) ? "feasible" : "BAD"));
+    result->info_message("Solution is %s.\n", (verify_full_solution(true,true) ? "feasible" : "BAD"));
     // might be "BAD" because the tied variables are not assigned values yet...
-    swap(force_been_solved,hasBeenSolved);
   }
   
-  void IncrementalIntervalAssignment::print_solution(string prefix)
+  void IncrementalIntervalAssignment::print_solution(string prefix) const
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -5858,14 +5827,11 @@ namespace IIA_Internal
     {
       print_solution_col(c);
     }
-    bool force_been_solved = true;
-    swap(force_been_solved,hasBeenSolved);
-    result->info_message("Solution is %s.\n", (verify_full_solution(true) ? "feasible" : "BAD"));
-    swap(force_been_solved,hasBeenSolved);
+    result->info_message("Solution is %s.\n", (verify_full_solution(true, true) ? "feasible" : "BAD"));
     result->info_message("end IA solution\n\n");
   }
   
-  void IncrementalIntervalAssignment::print_solution_row(int r, string prefix)
+  void IncrementalIntervalAssignment::print_solution_row(int r, string prefix) const
   {
     if (!prefix.empty()) result->info_message("%s ",prefix.c_str());
     auto &row = rows[r];
@@ -5876,7 +5842,7 @@ namespace IIA_Internal
     }
   }
   
-  void IncrementalIntervalAssignment::print_solution_col(int c)
+  void IncrementalIntervalAssignment::print_solution_col(int c) const
   {
     if (names_exist())
       result->info_message("  x%d %s", (int) c, col_names[c].c_str());
@@ -5904,7 +5870,7 @@ namespace IIA_Internal
   }
   
   
-  void MatrixSparseInt::print_matrix_summary(string prefix)
+  void MatrixSparseInt::print_matrix_summary(string prefix) const
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -5917,7 +5883,7 @@ namespace IIA_Internal
                          (unsigned long) num_nonzeros());
   }
   
-  void MatrixSparseInt::print_matrix(string prefix)
+  void MatrixSparseInt::print_matrix(string prefix) const
   {
     if (prefix.empty())
       result->info_message("\n");
@@ -5946,7 +5912,7 @@ namespace IIA_Internal
   }
   
   
-  void IncrementalIntervalAssignment::print()
+  void IncrementalIntervalAssignment::print() const
   {
     print_problem("");
   }
@@ -6218,9 +6184,9 @@ namespace IIA_Internal
   }
   
   
-  bool IncrementalIntervalAssignment::verify_full_solution(bool print_unsatisfied_constraints)
+  bool IncrementalIntervalAssignment::verify_full_solution(bool print_unsatisfied_constraints, bool pretend_solved) const
   {
-    if (!get_is_solved())
+    if (!pretend_solved && !get_is_solved())
     {
       if (print_unsatisfied_constraints)
       {
@@ -6376,7 +6342,7 @@ namespace IIA_Internal
     return rc;
   }
   
-  void MatrixSparseInt::print_map(const BlockingCols &amap)
+  void MatrixSparseInt::print_map(const BlockingCols &amap) const
   {
     for (auto m : amap)
     {

@@ -13,6 +13,7 @@ namespace IIA_Internal
   using std::set;
   
   class IncrementalIntervalAssignment;
+  class IAResultImplementation;
   
   // an element that we put into a priority queue, inherently tied to a variable column
   // to do, make a variant for constraint rows...
@@ -62,7 +63,7 @@ namespace IIA_Internal
       // ( value == rhs.value   && valueB == rhs.valueB   && valueC == rhs.valueC   && valueD == rhs.valueD && valueE < rhs.valueE);
     }
     
-    void print(IncrementalIntervalAssignment *iia);
+    void print(const IAResultImplementation *result) const;
   };
   
   // ensure elements are unique if they refer to a different column
@@ -90,24 +91,26 @@ namespace IIA_Internal
     }
   };
   
-  // set_values function. Updates value, valueB, valueC if intervals have changed.
+  // set_values function base class for assessing priority and quality of an interval setting for a curve
+  // Updates value, valueB, valueC if intervals have changed.
   // return true if the new values are less than (lower priority than) the old values
   class SetValuesFn
   {
   public:
     // sets values based on current IIA.col_solution
     //   updates solution and returns true if solution has changed or was unset
-    bool update_values(IncrementalIntervalAssignment &iia, QElement &qe);
+    bool update_values(const IncrementalIntervalAssignment &iia, QElement &qe);
     // sets values based on current iia.col_solution
-    void set_values(IncrementalIntervalAssignment &iia, QElement &qe);
+    void set_values(const IncrementalIntervalAssignment &iia, QElement &qe);
     // uses the passed in solution instead of iia's solution
-    void set_values(IncrementalIntervalAssignment &iia, QElement &qe, int solution);
+    void set_values(const IncrementalIntervalAssignment &iia, QElement &qe, int solution);
   protected:
     // assumes qe.solution is already set, uses that instead of col_solution
-    virtual void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) = 0;
-    // virtual void print( const QElement &qe );
+    virtual void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) = 0;
   };
-  // specializations set the values based on differing criteria
+  
+  
+  // specializations for differing quality/priority criteria
   
   
   // ratio  (current-increment)/goal                  for current>goal
@@ -117,9 +120,9 @@ namespace IIA_Internal
   public:
     SetValuesRatioR() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   private:
-    void set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe );
+    void set_values_goal(const IncrementalIntervalAssignment &iia, double g, QElement &qe );
   };
   
   // ratio  current/goal     for current>goal
@@ -129,18 +132,20 @@ namespace IIA_Internal
   public:
     SetValuesRatio() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
-    void set_values_goal(IncrementalIntervalAssignment &iia, double g, QElement &qe );
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
+    void set_values_goal(const IncrementalIntervalAssignment &iia, double g, QElement &qe );
   };
   
+  // how far out-of-bounds is the variable value
   class SetValuesBounds: public SetValuesFn
   {
   public:
     SetValuesBounds() {}
   protected:
-    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
-  // also want a queue element for a constraint?
+  
+  // used in RREF
   
   // for picking a column to eliminate in rref that has a single 1
   class SetValuesOneCoeff: public SetValuesFn
@@ -148,7 +153,7 @@ namespace IIA_Internal
   public:
     SetValuesOneCoeff() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
   
   // in order of increasing number of coefficients = number of rows the variable appears in
@@ -157,9 +162,8 @@ namespace IIA_Internal
   public:
     SetValuesNumCoeff() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
-  
   
   // pick column to eliminate in rref, that has a small coeff, is in few rows, and is long
   class SetValuesCoeffRowsGoal: public SetValuesFn
@@ -167,19 +171,18 @@ namespace IIA_Internal
   public:
     SetValuesCoeffRowsGoal() {}
   public:
-    void set_values_implementation(IncrementalIntervalAssignment &iia, QElement &qe ) override;
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
-  
   
   // true if A<B by lexicographic min max
   bool is_better( vector<QElement> &qA, vector<QElement> &qB);
   
-  
+  // like a priority queue but you can update the priority of an element higher or lower. Based on set sorting.
   class QWithReplacement
   {
   public:
     
-    QWithReplacement(IncrementalIntervalAssignment *iia_in, SetValuesFn &f, double f_threshold)
+    QWithReplacement(const IncrementalIntervalAssignment *iia_in, SetValuesFn &f, double f_threshold)
     : val_fn(&f), threshold(f_threshold), iia(iia_in) {}
     
     void build(const vector<int> &cols);
@@ -195,7 +198,7 @@ namespace IIA_Internal
     bool empty() {return Q.empty();}
     
     // debug
-    void print();
+    void print() const;
     
     size_t size() {return Q.size();}
     
@@ -204,7 +207,7 @@ namespace IIA_Internal
     set<QElement,QElement_less_for_sets> Q;
     SetValuesFn *val_fn = nullptr;
     double threshold = 0.0;
-    IncrementalIntervalAssignment *iia = nullptr;
+    const IncrementalIntervalAssignment *iia = nullptr;
     
     // conditionally add a q element for column c
     void add(int c);

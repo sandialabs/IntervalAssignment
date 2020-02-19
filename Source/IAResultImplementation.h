@@ -18,19 +18,18 @@ namespace IIA_Internal
     virtual ~IAResultImplementation();
     
     // these call log_message
-    void info_message(const char* format, ...);
-    void warning_message(const char* format, ...);
-    void error_message(const char* format, ...);
-    void debug_message(const char* format, ...);
+    void info_message(const char* format, ...) const;
+    void warning_message(const char* format, ...) const;
+    void error_message(const char* format, ...) const;
+    void debug_message(const char* format, ...) const;
     
   protected:
     enum MessageType {INFO_MSG, WARNING_MSG, ERROR_MSG, DEBUG_MSG };
-    void log_message(MessageType message_type, const std::string &prefix, const char* format, va_list args);
+    void log_message(MessageType message_type, const std::string &prefix, const char* format, va_list args) const;
     // std::vector<char> message; // buffer for printing log messages
-    char message[2048]; // buffer for printing log messages
-    bool line_start = true;
-    MessageType last_message_type = INFO_MSG;
-    
+    mutable char message[2048]; // buffer for printing log messages
+    mutable bool line_start = true;
+    mutable MessageType last_message_type = INFO_MSG;
   };
   
   void print_vec(IAResultImplementation *result, const std::vector<int> &vec, bool lf = true);
