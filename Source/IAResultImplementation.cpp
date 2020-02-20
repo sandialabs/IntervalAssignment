@@ -1,17 +1,8 @@
 // IAResultImplementation.cpp
 #include "IAResultImplementation.h"
-#include <stdio.h>
-#include <iostream>
-#include <cstdarg>
 
 namespace IIA_Internal
 {
-  
-  IAResultImplementation::IAResultImplementation()
-  {
-    // message.reserve(2048);
-  }
-  
   IAResultImplementation::~IAResultImplementation()
   {
     if (message_log!=nullptr)

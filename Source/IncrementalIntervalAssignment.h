@@ -1,13 +1,9 @@
 //- Class: IncrementalIntervalAssignment
-//- Owner: Scott Mitchell
 //- Description: Implementation of setting up and solving interval assigment.
-//- Checked By: 
-//- Version: $Id:
 
 #ifndef INTERVAL_ASSIGNMENT_IMPLEMENTATION_H
 #define INTERVAL_ASSIGNMENT_IMPLEMENTATION_H
 
-#include <cassert>
 #include <vector>
 #include <set>
 #include <map>
@@ -169,12 +165,14 @@ namespace IIA_Internal
     void copy_me( IncrementalIntervalAssignment *target );
 
     // solve interval assignment Mx = B for x
-    //   also works to re-solve a problem after adding new rows.
-    //   first_time is just a hint.
-    bool solve( bool do_improve = true, bool first_time = true );
-    
-    int get_is_solved()    const {return hasBeenSolved;}
-    void set_is_unsolved()              {hasBeenSolved=false;}
+    //   also works to re-solve a problem after adding new rows, continuing from the prior solution
+    //   if first_time is set to true, then we solve from scratch and not re-solve no matter what.
+    bool solve( bool do_improve = true, bool first_time = false );
+
+    // has the problem been solved. Changing the problem will set this flag to false
+    int get_is_solved() const;
+    // set_is_unsolved will also ensure than next call to solve will start from scratch
+    void set_is_unsolved();
 
     // problem size
     int num_rows() const {return number_of_rows;}
@@ -203,8 +201,8 @@ namespace IIA_Internal
     void clear_M(int row); // clear the entries of this row. col_rows is invalid
     
     // type of constraint for each row, =, <=, >=, EVEN,...
-    void set_constraint(int row, ConstraintType constraint_type) {constraint[row]=constraint_type;}
-    ConstraintType get_constraint(int row) {return constraint[row];}
+    void set_constraint(int row, ConstraintType constraint_type);
+    ConstraintType get_constraint(int row) const {return constraint[row];}
 
     // right hand side
     int  get_B( int row ) const;
@@ -218,8 +216,9 @@ namespace IIA_Internal
     // variable bounds
     int  get_lower ( int col ) const {return col_lower_bounds[col];}
     int  get_upper ( int col ) const {return col_upper_bounds[col];}
-    void set_lower ( int col, int bound )   {col_lower_bounds[col]=bound;}
-    void set_upper ( int col, int bound )   {col_upper_bounds[col]=bound;}
+    void set_lower ( int col, int bound );
+    void set_upper ( int col, int bound );
+
     // to set no bounds
     //   set_lower( c, numeric_limits<int>::lowest() );
     //   set_upper( c, numeric_limits<int>::max() );
@@ -249,7 +248,7 @@ namespace IIA_Internal
     
     bool hasBeenSolved=false;
     int number_of_rows=0, used_row=-1, solved_used_row=-1;
-    int number_of_cols=0, used_col=-1;
+    int number_of_cols=0, used_col=-1, solved_used_col=-1;
     
     vector<int> col_lower_bounds, col_upper_bounds, col_solution;
     vector<double> goals;
@@ -456,9 +455,6 @@ namespace IIA_Internal
     //   if re-solving, add slack variables so we start with an initial feasible soution
     bool convert_inequalities();
 
-    // assign some values to variables before we truly solve
-    void solution_init();
-    
     void count_used_rows_cols();
 
     void add_more_columns();
@@ -585,6 +581,16 @@ namespace IIA_Internal
   inline
   void IncrementalIntervalAssignment::set_B( int row, int val )
   {
+    if (rhs[row] != val)
+    {
+      hasBeenSolved=false;
+      if ( row <= solved_used_row )
+      {
+        solved_used_row = -1;
+        solved_used_col = -1;
+      }
+    }
+
     rhs[row] = val;
   }
   
@@ -597,6 +603,16 @@ namespace IIA_Internal
   inline
   void IncrementalIntervalAssignment::set_no_goal(int c)
   {
+    if (goals[c] != 0.)
+    {
+      hasBeenSolved=false;
+      if ( c <= solved_used_col )
+      {
+        solved_used_row = -1;
+        solved_used_col = -1;
+      }
+    }
+
     goals[c]=0.; // flag that the goal should be ignored
   }
   
@@ -631,6 +647,70 @@ namespace IIA_Internal
   {
     return row_sum(rows[r].cols,rows[r].vals,rhs[r]);
   }
+
+  inline
+  int IncrementalIntervalAssignment::get_is_solved() const
+  {
+    return hasBeenSolved;
+    
+  }
+  
+  inline
+  void IncrementalIntervalAssignment::set_is_unsolved()
+  {
+    hasBeenSolved=false;
+    solved_used_row = -1;
+    solved_used_col = -1;
+  }
+
+  inline
+  void IncrementalIntervalAssignment::set_constraint(int row, ConstraintType constraint_type)
+  {
+    if (constraint[row]!=constraint_type)
+    {
+      hasBeenSolved=false;
+      if (row <= solved_used_row)
+      {
+        solved_used_row=-1;
+        solved_used_col=-1;
+      }
+    }
+    
+    constraint[row]=constraint_type;
+  }
+
+  inline
+  void IncrementalIntervalAssignment::set_lower ( int col, int bound )
+  {
+    col_lower_bounds[col]=bound;
+    
+    if (col_solution[col]<bound)
+    {
+      hasBeenSolved=false;
+      if ( col <= solved_used_col )
+      {
+        solved_used_row = -1;
+        solved_used_col = -1;
+      }
+    }
+  }
+  
+  inline
+  void IncrementalIntervalAssignment::set_upper ( int col, int bound )
+  {
+    col_upper_bounds[col]=bound;
+
+    if (col_solution[col]>bound)
+    {
+      hasBeenSolved=false;
+      if ( col <= solved_used_col )
+      {
+        solved_used_row = -1;
+        solved_used_col = -1;
+      }
+    }
+  }
+
   
 } // namespace
 

@@ -3,8 +3,7 @@
 #ifndef IARESULT_H
 #define IARESULT_H
 
-#include <vector>
-#include <string>
+#include <ostream>
 
 namespace IIA
 {

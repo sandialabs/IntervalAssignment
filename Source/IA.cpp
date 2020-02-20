@@ -3,8 +3,6 @@
 #include "IA.h"
 #include "IncrementalIntervalAssignment.h"
 #include "IAResultImplementation.h"
-#include <limits>
-#include <iostream>
 
 namespace IIA
 {
@@ -219,18 +217,26 @@ namespace IIA
   {
     return ia->solve(true, true);
   }
+  
   bool IA::solve()
   {
     // works for re-solving, too
     return ia->solve(true, false);
   }
+  
   bool IA::solve_feasible()
   {
     return ia->solve(false, false);
   }
+  
   bool IA::is_solved()
   {
     return ia->get_is_solved();
+  }
+  
+  void IA::solve_from_scratch_next_time()
+  {
+    ia->set_is_unsolved();
   }
   
   int IA::get_solution(int col) const

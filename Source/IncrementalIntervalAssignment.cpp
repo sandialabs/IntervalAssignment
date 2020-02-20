@@ -5,6 +5,7 @@
 
 #include <numeric>
 #include <cmath>
+#include <cassert>
 
 #include "IAResultImplementation.h"
 
@@ -29,11 +30,12 @@
 //  x clean up Queue friend issues
 //  x method to copy a problem
 //       test it
-//   changing a row invalidates the old solution
-//   figure out when to reset the solved flag,
-//   callable method to invalidate old solution
+//  x changing a row / col / constraint / bound invalidates the old solution
+//       test it
+//  x figure out when to reset the solved flag,
+//  x callable method to invalidate old solution
 //        test invalidating the old solution, and resolving
-//  x-get rid of names ( caller can keep track of that if needed)
+//  x get rid of names ( caller can keep track of that if needed)
 //  x IA::solve_feasible, skip improvement phase
 //   use a tool to determine code that isn't used and delete it
 //  x fill in public interface methods
@@ -186,17 +188,6 @@ namespace IIA_Internal
     }
     sum -= rhs;
     return sum;
-  }
-  
-  void IncrementalIntervalAssignment::solution_init()
-  {
-    if (solved_used_row>=0)
-    {
-      // start with our prior solution for most variables
-      // we already set the initial value of the new variables in ::solve
-      return;
-    }
-    assign_vars_goals(true);
   }
   
   // assign independent vars to their closest integer goal
@@ -535,6 +526,7 @@ namespace IIA_Internal
   
   double IncrementalIntervalAssignment::set_goal(int c, double goal)
   {
+    
     // scale goals to range [t2,infinity) to avoid blow-up elsewhere
     //   monotonic, continuous
     const double t1=1.e-3;
@@ -546,6 +538,16 @@ namespace IIA_Internal
       // scale goal < 0 to [t2, 2*t2]
       goal = (goal<0. ? t2*(1. + 1./(1.-goal))
               : 2.*t2 + ((t1 - 2.*t2)/t1) *goal);
+    }
+    
+    if (goals[c] != goal)
+    {
+      hasBeenSolved=false;
+      if ( c <= solved_used_col )
+      {
+        solved_used_row = -1;
+        solved_used_col = -1;
+      }
     }
     
     goals[c]=goal;
@@ -2635,7 +2637,7 @@ namespace IIA_Internal
       // unreduce col, so we can reduce any blockers in its row instead
       unreduce(r, col, all_blocking_cols);
       
-      // zzyk, to do: should we add new_blocking_cols to all_blocking_cols regardless of whether we can reduce them?
+      // to research: should we add new_blocking_cols to all_blocking_cols regardless of whether we can reduce them?
       // for now, we only store the eliminated ones, but this might confuse the caller
       
       unblocked_row=-1; // row we can increment by
@@ -3632,10 +3634,9 @@ namespace IIA_Internal
   
   void IncrementalIntervalAssignment::row_swap(int r, int s)
   {
-    // to do zzyk
+    // optimization
     //   this is a lot of data movement. performance hit?
-    //   Consider also keeping a vector of indices and just updating those.
-    //   Consider what to do if we want to use different variables as the dependent ones
+    //   Consider instead keeping a vector of indices and just updating those.
     if (r==s)
       return;
     
@@ -3811,7 +3812,7 @@ namespace IIA_Internal
     assert(imax>0);
     assert(jmax>0);
     
-    // zzyk speedup, consider making these permanent working space in the matrix
+    // optimization, use permanent working space in the matrix
     new_cols.clear();
     new_vals.clear();
     new_cols.reserve(imax+jmax);
@@ -4737,23 +4738,19 @@ namespace IIA_Internal
       {
         if (val==0)
         {
-          if (i+1==cols.size())
-          {
-            cols.pop_back();
-            vals.pop_back();
-          }
-          else
+          if (i+1<cols.size())
           {
             swap(cols[i],cols.back());
             swap(vals[i],vals.back());
-            // cols.pop_back();
-            // vals.pop_back();
-            // rows[row].sort();
           }
+          cols.pop_back();
+          vals.pop_back();
+          // rows[row].sort();
         }
         else
           vals[i]=val;
-        return;
+        val = 0; // flag to not add the value
+        break;
       }
     }
     if (val!=0)
@@ -4763,13 +4760,28 @@ namespace IIA_Internal
       vals.push_back(val);
       // rows[row].sort();
     }
+    
+    hasBeenSolved=false;
+    if (row <= solved_used_row)
+    {
+      solved_used_row = -1;
+      solved_used_col = -1;
+    }
   }
+  
   void IncrementalIntervalAssignment::set_M( int row,  vector<int> &cols, vector<int> &vals )
   {
     rows[row].cols.swap(cols);
     rows[row].vals.swap(vals);
     // not sorted yet
     // columns not filled in yet
+
+    hasBeenSolved=false;
+    if (row <= solved_used_row)
+    {
+      solved_used_row = -1;
+      solved_used_col = -1;
+    }
   }
   
   int IncrementalIntervalAssignment::solve_sub(bool do_improve)
@@ -5091,7 +5103,7 @@ namespace IIA_Internal
     // convert inequalities into equalities with dummy variables
     int num_even=0, num_ineq=0, num_eq=0, num_new=0;
     const bool is_re_solving = solved_used_row>=0;
-    for (int r = max(0,solved_used_row); r <= used_row; ++r)
+    for (int r = max(0,solved_used_row+1); r <= used_row; ++r)
     {
       const bool row_is_new = (is_re_solving && r>solved_used_row);
       if (row_is_new)
@@ -5215,6 +5227,7 @@ namespace IIA_Internal
     else if (first_time)
     {
       solved_used_row = -1; // force it to ignore any prior solution
+      solved_used_col = -1;
     }
     
     count_used_rows_cols();
@@ -5232,7 +5245,7 @@ namespace IIA_Internal
     if (first_time)
     {
       // derived-class-specific initialization
-      solution_init();
+      assign_vars_goals(true);
       should_adjust_solution_tied_variables = true;
     }
     else // !first_time
@@ -5242,24 +5255,7 @@ namespace IIA_Internal
       
       // don't init solution, don't adjust tied variables
       should_adjust_solution_tied_variables = false;
-      
-      // debug
-      if (result->log_debug)
-      {
-        const auto num_new = used_row-solved_used_row;
-        if (num_new)
-        {
-          result->debug_message("%d new u_submap constraints augmented with with %d dummy slack variables\n",num_new, num_new);
-          print_problem("full problem initial after u_submap augmentation");
-        }
-        else
-        {
-          result->debug_message("no new u_submap constraints\n");
-        }
-      }
-      // debug
-    } // !first_time
-    
+    }
 
     if (result->log_debug)
     {
@@ -5301,7 +5297,8 @@ namespace IIA_Internal
     if (success)
     {
       hasBeenSolved=true;
-      solved_used_row=used_row;
+      solved_used_row = used_row;
+      solved_used_col = used_col;
     }
     result->solved = success;
 
@@ -5545,7 +5542,6 @@ namespace IIA_Internal
       result->info_message("%s ",prefix.c_str());
     result->info_message("IIA solution\n");
     result->info_message("  %s\n", hasBeenSolved ? "SOLVED" : "unsolved");
-    // result->info_message("var values stubbed out\n"); // zzyk
     for (int c=0; c <= used_col && c < (int)col_rows.size(); ++c)
     {
       print_solution_col(c);
@@ -5614,7 +5610,6 @@ namespace IIA_Internal
                          (unsigned long) rows.size(),
                          (unsigned long) col_rows.size());
     //result->info_message("stubbed out\n"); return;
-    // zzyk
     result->info_message("Rows\n");
     for (size_t r =0; r < rows.size(); ++r)
     {
@@ -6081,6 +6076,7 @@ namespace IIA_Internal
     target->solved_used_row  = solved_used_row;
     target->number_of_cols   = number_of_cols;
     target->used_col         = used_col;
+    target->solved_used_col  = solved_used_col;
     target->col_lower_bounds = col_lower_bounds;
     target->col_upper_bounds = col_upper_bounds;
     target->col_solution     = col_solution;

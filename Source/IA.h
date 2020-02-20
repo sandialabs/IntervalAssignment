@@ -8,7 +8,6 @@
 #define INTERVAL_ASSIGNMENT_H
 
 #include <vector>
-#include <string>
 
 #include "IAEnums.h"
 #include "IAResult.h"
@@ -102,9 +101,10 @@ namespace IIA
     
     //== Solve
     
-    // sets x
-    bool solve_from_scratch(); // solves, overwriting any prior solution
-    bool solve();              // solves, if there is a prior solution, we continue from there
+    // solve for x
+    bool solve();              // Recommended. If there is a prior solution, we continue from there.
+    bool solve_from_scratch(); // Ignores any prior solution and starts from the beginning.
+    void solve_from_scratch_next_time(); // next call to "solve" will not continue from a prior solution.
     bool solve_feasible();     // solves constraints and bounds only, ignores goals.
     bool is_solved();
     

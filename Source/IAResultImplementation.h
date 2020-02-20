@@ -14,7 +14,7 @@ namespace IIA_Internal
   {
     // io
   public:
-    IAResultImplementation();
+    IAResultImplementation() {}
     virtual ~IAResultImplementation();
     
     // these call log_message
@@ -36,7 +36,7 @@ namespace IIA_Internal
   void print_vec(IAResultImplementation *result, const std::vector< std::pair<int,int> > &vec);
   void print_set(IAResultImplementation *result, const std::set< std::pair<int,int> > &aset);
   void print_map(IAResultImplementation *result, const std::map<int,int> &amap);
-  
+ 
 }
 
 #endif
