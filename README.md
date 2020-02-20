@@ -3,7 +3,7 @@ GitHub repository
 https://github.com/samitch/IntervalAssignment.git 
 
 IIA, Incremental Interval Assignment by Integer Linear Algebra, is a solver for optimizing integer matrix problems Ax=b.
-IIA was developed to decide the number of mesh edges on model curves (intervals) for quad and hex meshing. Meshing schemes impose constraints, ranging from the mild requirement that any quad mesh must have an even number of edges on its boundary, to structured mapped patches where opposite sides of a rectangle must have exacly equal numbers of edges. 
+IIA was developed for the application of deciding the number of mesh edges on model curves (intervals) for quad and hex meshing. Meshing schemes impose constraints, ranging from the mild requirement that any quad mesh must have an even number of edges on its boundary, to structured mapped patches where opposite sides of a rectangle must have exactly equal numbers of edges.
 
 
 == Problem & Solution
@@ -37,7 +37,7 @@ The main source of non-robustness is finding linear combinations of N that point
 
 == Why Use It?
 
-The benefits of IIA are speed and always producing an integer solution. The drawback is the potential for the bounds to be unsatisfied or the solution to be sub-optimal. Example serial runtime is 0.2 seconds for A sized 2000 x 2000 with about 4000 non-zeros. This is phenomenally fast for an Ax=b integer problem. In contrast, a predecessor code (BBIA) based on linear programming and branch and bound solves the same example problem in 20 minutes, 6000x slower.
+The benefits of IIA are speed and always producing an integer solution. The drawback is the potential for the bounds to be unsatisfied or the solution to be sub-optimal. Example serial runtime is 0.2 seconds for matrix A sized 2000 x 2000 with about 4000 non-zeros. This is phenomenally fast for an Ax=b integer problem. In contrast, a predecessor code (BBIA) based on linear programming and branch and bound solves the same example problem in 20 minutes, 6000x slower.
 
 IIA is C++ and has *no* dependencies. 
 IA.h is the interface.
@@ -49,8 +49,6 @@ The driver code test.cpp gives examples of setting up and solving the problem.
 The predecessors to this code include BBIA, a linear-programming plus branch-and-bound solver, implemented in Cubit in 1995--1997 by Scott A. Mitchell and maintained ever since (2020+) by the Cubit team [BBIA]. Another predecessor code by Scott A. Mitchell is NLIA, a non-linear programming based approach that attempted to reduce (but not eliminate) the need for branch and bound [NLIA]. A direct progenitor is MSIIA, a version developed for the simpler context of refining or coarsening an existing hex mesh in a semi-structured way [MSIIA, MSIIA LDRD]. This code (IIA) was developed in Cubit, then extracted to become this library-like standalone.
 
 "I" is the IIA author, Scott A. Mitchell. I thank Jason Shepherd, Robert Kerr, Michael Plooster, and Clinton Stimpson for their work on BBIA, and the related work of defining what constraints and goals should be sent to the solver. I thank Clinton Stimpson for his work on the infrastructure related to the Cubit version of IIA. I thank Timothy Tautges for prioritizing the interval assignment problem and supporting the work of both BBIA and NLIA. I thank Matthew Staten for supporting and inspiring MSIIA, which was the genesis for me thinking IIA might be a viable approach for the general problem. I thank Roshan Quadros, Michael Parks, and Michael Skroch for suporting the development of IIA. I thank Roshan Quadros, Trevor Hensley, and Salome Thorson for faciliating discussions with Cubit users  Jacquelyn Rae Moore, Neal Grieb, and others, to help determine desirable constraints, bounds and options. I thank David White for his work on autoscheme, the problem of deciding which meshing scheme (algorithm) to use for individual surfaces and volumes, and for using interval assignment to determine if a scheme is feasible. I thank Paul Stallings and Byron Hanks for discussion on how to define a clean interface to IIA. To the best of my knowledge there are no other authors of IIA besides Scott A. Mitchell, with the exception of some generic infrastructure from Cubit developed by the people mentioned in this acknowledgement.
-
-This material is based upon work supported by the U.S. Department of Energy, Office of Science, Office of Advanced Scientific Computing Research (ASCR), Applied Mathematics Program. This work was partially supported by the Laboratory Directed Research and Development program at Sandia National Laboratories. Sandia National Laboratories is a multi-program laboratory managed and operated by National Technology and Engineering Solutions of Sandia, LLC., a wholly owned subsidiary of Honeywell International, Inc., for the U.S. Department of Energy's National Nuclear Security Administration under contract DE-NA-0003525.
 
 
 == Bibliography

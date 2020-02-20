@@ -11,51 +11,6 @@
 
 #include "CpuTimer.h"
 
-// to do (x = done)
-//  x move freeze_problem_size to start of solve, depending on whether solving for the first time or not
-//  x CUBIT_TRUE, CUBIT_FALSE to true and false
-//  x GE etc to GE, etc
-//  x CUBIT_FAILURE, CUBIT_SUCCESS to bool
-//  x  data layout for variables with goals and slack variables and sum-even vars... probably fast enough we can just go over all of them and check the goals. maybe need something to mark vars whose column coefficients are 2
-//  x    gather and save as set at beginning of problem. Caller might have defined dummy variables, etc.
-//  x auto determine variable type
-//  x sum-even constraint conversion
-//  x  fill in new_col
-//  x initialize goals to 1, bounds to 1,inf, etc.
-//  x-skipped int new_row(MRow &Mrow);  convert from MRow to our sparse format
-//  x PRINT_INFO, print_flag, put in log instead
-//  x verify_full_solution, get rid of refentities
-//  x get rid of names
-//  x figure out when to sort rows, perhaps a flag as to whether they've been sorted or not
-//  x clean up Queue friend issues
-//  x method to copy a problem
-//       test it
-//  x changing a row / col / constraint / bound invalidates the old solution
-//       test it
-//  x figure out when to reset the solved flag,
-//  x callable method to invalidate old solution
-//        test invalidating the old solution, and resolving
-//  x get rid of names ( caller can keep track of that if needed)
-//  x IA::solve_feasible, skip improvement phase
-//  x-skip, checked manually use a tool to determine code that isn't used and delete it
-//  x fill in public interface methods
-//  x get rid of compiler warnings, sign comparision and losing precision, etc.
-//  x auto resizing
-//   fill in test.cpp
-//  x get rid of the +1 indexing when subdividing the problem.  check for inefficient array searches
-//   beautify output
-//  x collect public, private methods of IncrementalIntervalAssignment in header file
-//  x organize like methods
-//  x combine solve_map and solve_even into one function
-//  x vector -> using vector,  vector
-//   cmake
-//   test on a few compilers
-//   template test problem, instructions, in test.cpp and readme file
-//   acknowledge Paul Stallings, Jason Shepherd, Bob Kerr, Tim Tautges, Michael Brewer, ...
-
-//  paperwork to release it
-//  cputimer?
-
 // math utilities
 namespace IIA_Internal
 {
