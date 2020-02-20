@@ -12,6 +12,7 @@
 		D243C81623EE465200F3C7BF /* CpuTimer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81523EE465200F3C7BF /* CpuTimer.cpp */; };
 		D243C81923EE47F000F3C7BF /* IAResultImplementation.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */; };
 		D243C81B23F5FEB700F3C7BF /* test.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81A23F5FEB600F3C7BF /* test.cpp */; };
+		D2B6599123FCEA29009EBEAE /* IAQueue.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D2B6599023FCEA29009EBEAE /* IAQueue.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -40,6 +41,8 @@
 		D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IAResultImplementation.cpp; path = ../../Source/IAResultImplementation.cpp; sourceTree = "<group>"; };
 		D243C81823EE47EF00F3C7BF /* IAResultImplementation.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAResultImplementation.h; path = ../../Source/IAResultImplementation.h; sourceTree = "<group>"; };
 		D243C81A23F5FEB600F3C7BF /* test.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = test.cpp; path = ../../Source/test.cpp; sourceTree = "<group>"; };
+		D2B6598F23FCE916009EBEAE /* IAQueue.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAQueue.h; path = ../../Source/IAQueue.h; sourceTree = "<group>"; };
+		D2B6599023FCEA29009EBEAE /* IAQueue.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IAQueue.cpp; path = ../../Source/IAQueue.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,6 +75,8 @@
 		D243C7FD23EB929800F3C7BF /* IntervalAssignment-xcode */ = {
 			isa = PBXGroup;
 			children = (
+				D2B6599023FCEA29009EBEAE /* IAQueue.cpp */,
+				D2B6598F23FCE916009EBEAE /* IAQueue.h */,
 				D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */,
 				D243C81823EE47EF00F3C7BF /* IAResultImplementation.h */,
 				D243C81523EE465200F3C7BF /* CpuTimer.cpp */,
@@ -149,6 +154,7 @@
 				D243C81623EE465200F3C7BF /* CpuTimer.cpp in Sources */,
 				D243C81923EE47F000F3C7BF /* IAResultImplementation.cpp in Sources */,
 				D243C81B23F5FEB700F3C7BF /* test.cpp in Sources */,
+				D2B6599123FCEA29009EBEAE /* IAQueue.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -37,7 +37,7 @@
 //        test invalidating the old solution, and resolving
 //  x get rid of names ( caller can keep track of that if needed)
 //  x IA::solve_feasible, skip improvement phase
-//   use a tool to determine code that isn't used and delete it
+//  x-skip, checked manually use a tool to determine code that isn't used and delete it
 //  x fill in public interface methods
 //  x get rid of compiler warnings, sign comparision and losing precision, etc.
 //  x auto resizing
@@ -50,8 +50,11 @@
 //  x vector -> using vector,  vector
 //   cmake
 //   test on a few compilers
+//   template test problem, instructions, in test.cpp and readme file
+//   acknowledge Paul Stallings, Jason Shepherd, Bob Kerr, Tim Tautges, Michael Brewer, ...
 
 //  paperwork to release it
+//  cputimer?
 
 // math utilities
 namespace IIA_Internal
@@ -62,8 +65,6 @@ namespace IIA_Internal
   using IIA::LE;
   using IIA::GE;
   using IIA::EVEN;
-  using IIA::FREE;
-  using IIA::BAD;
   
   using std::max;
   using std::min;
@@ -2919,9 +2920,6 @@ namespace IIA_Internal
       else
       {
         result->warning_message("IIA: Gaussian elimination to both reduce_coefficient and fix blocking cols is not implemented.\n");
-        // tests that hit this warning:
-        // cubit100.test : lecture3.jou  lecture9.jou  lecture10.jou
-        // to find them all, just change the warning to an error and run the test suite
       }
     }
     
@@ -3059,11 +3057,8 @@ namespace IIA_Internal
   
   // For an explanation of Reduced Row Echelon Form, see
   // https://people.sc.fsu.edu/~jburkardt/c_src/row_echelon_integer/row_echelon_integer.html
-  // which provides Matlab and C versions for dense matrices, with LGPL license
-  // The Matlab version is actually more understandable than the C one
   //
   // For how this helps us compute the nullspace of a maxtrix (multiply), see
-  // Finding the basis for the null space
   // https://math.stackexchange.com/questions/88301/finding-the-basis-of-a-null-space
   //
   // For how that helps us solve the Integer optimization problem, see
@@ -3962,7 +3957,7 @@ namespace IIA_Internal
     // Form column-form of HNF, the lower triangular matrix
     // Implemented via row operations on the transpose instead of column operations,
     //   because row-ops are what is implemented, and, more importantly, row-ops are what we've optimized the matrix data structure for.
-    // Write all comments as if we are doing column operations, to make it easier to follow, but IMP describes what that translates to in our implementation
+    // Write all comments as if we are doing column operations, to make it easier to follow, but "IMP" describes what that translates to in our implementation
     
     // Copy this to B.  IMP copy this^T to B
     // Reduce to only the non-zero rows, as RREF may have removed some redundant constraints from the end
@@ -5119,7 +5114,7 @@ namespace IIA_Internal
         rows[r].cols.push_back(c);
         rows[r].vals.push_back(-2);
         col_rows[c].push_back(r);
-        col_lower_bounds[c]=2;
+        col_lower_bounds[c]=2; // sum is at least 4
         // no upper bound
         
         constraint[r]=EQ;
@@ -5400,9 +5395,6 @@ namespace IIA_Internal
     
     switch (constraint[r])
     {
-      case FREE:
-        result->info_message(" unconstrained ");
-        break;
       case LE:
         result->info_message(" <= ");
         break;
@@ -5413,7 +5405,7 @@ namespace IIA_Internal
         result->info_message(" = ");
         break;
       case EVEN:
-        result->info_message(" = Even ");
+        result->info_message(" = 2k (even) + ");
         break;
       default:
         result->info_message(" ?unknown_relation ");

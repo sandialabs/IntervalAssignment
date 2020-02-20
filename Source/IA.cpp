@@ -9,8 +9,7 @@ namespace IIA
   using IIA_Internal::IncrementalIntervalAssignment;
   using IIA_Internal::IAResultImplementation;
   
-  // can't be inline because we need the non-stubbed version of IncrementalIntervalAssignment
-  IA::IA() : free_row(0)
+  IA::IA()
   {
     auto r = new IAResultImplementation();
     result = r;
@@ -42,13 +41,12 @@ namespace IIA
   }
 
   
-  //== space for problem
+  //== space
   void IA::clear()
   {
     // could do this more efficiently...
     delete ia;
     ia = new IncrementalIntervalAssignment( dynamic_cast<IAResultImplementation*>(result) );
-    free_row = 0;
   }
   
   void IA::reserve(size_t nrows, size_t ncols)
@@ -229,14 +227,14 @@ namespace IIA
     return ia->solve(false, false);
   }
   
-  bool IA::is_solved()
-  {
-    return ia->get_is_solved();
-  }
-  
   void IA::solve_from_scratch_next_time()
   {
     ia->set_is_unsolved();
+  }
+  
+  bool IA::is_solved() const
+  {
+    return ia->get_is_solved();
   }
   
   int IA::get_solution(int col) const
