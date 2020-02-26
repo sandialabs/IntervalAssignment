@@ -39,7 +39,7 @@ The main source of non-robustness is finding linear combinations of N that point
 
 The benefits of IIA are speed and always producing an integer solution. The drawback is the potential for the bounds to be unsatisfied or the solution to be sub-optimal. Example serial runtime is 0.2 seconds for matrix A sized 2000 x 2000 with about 4000 non-zeros. This is phenomenally fast for an Ax=b integer problem. In contrast, a predecessor code (BBIA) based on linear programming and branch and bound solves the same example problem in 20 minutes, 6000x slower.
 
-IIA is C++ and has *no* dependencies. 
+IIA is C++11 and has *no* dependencies. 
 IA.h is the interface.
 The driver code test.cpp gives examples of setting up and solving the problem.
 

@@ -40,5 +40,7 @@ to do (x = done)
   template test problem, instructions, in test.cpp 
  x readme file
  x cputimer - not a significant component, OK to release
+  check Result error flags, solved flags, etc.,
+  export a few monster problems (heat sink) from cubit
 
  paperwork to release it

@@ -29,9 +29,7 @@ namespace IIA_Internal
     double valueA = 0; // primary criteria
     double valueB = 0; // secondary
     double valueC = 0; // tertiary
-                       // int valueD = 0.; // 4th
-                       // int valueE = 0.; // 5th
-                       // c is last-resort arbitrary tiebreaker
+                       // c is last-resort arbitrary tiebreaker for less_for_sets
                        // biggest elements are the ones at the top of the queue, end of the set
     
     int dx = 0; // desire increment +1, or decrement -1
@@ -49,18 +47,11 @@ namespace IIA_Internal
       if (valueC < rhs.valueC)
         return true;
       // we do not want a tiebreaker when assessing quality, but we do need one for sets
-      // if (valueC > rhs.valueC)
-      //  return false;
-      // if (c < rhs.c)
-      //   return true;
-      // if (c > rhs.c), or if equal
       return false;
       //      return
       //      ( valueA <  rhs.valueA ) ||
       //      ( valueA == rhs.valueA   && valueB <  rhs.valueB ) ||
-      //      ( valueA == rhs.valueA   && valueB == rhs.valueB   && valueC <  rhs.valueC ); // ||
-      // ( value == rhs.value   && valueB == rhs.valueB   && valueC == rhs.valueC   && valueD <  rhs.valueD) ||
-      // ( value == rhs.value   && valueB == rhs.valueB   && valueC == rhs.valueC   && valueD == rhs.valueD && valueE < rhs.valueE);
+      //      ( valueA == rhs.valueA   && valueB == rhs.valueB   && valueC <  rhs.valueC );
     }
     
     void print(const IAResultImplementation *result) const;

@@ -638,7 +638,7 @@ namespace IIA_Internal
   public:
     IIATester(IAResultImplementation *result_ptr) : IncrementalIntervalAssignment(result_ptr) {setup_io(result_ptr);}
     
-    bool test_hnf_solver(std::vector<int> &expected_solution, bool expect_fail=false);
+    bool test_hnf_solver(std::vector<int> &expected_solution, std::vector<int> *nullspace_vector=nullptr, bool expect_fail=false);
     bool test_rref_constraints();
     bool test_rref_improve();
     
@@ -697,7 +697,7 @@ namespace IIA_Internal
     return (rref_OK && nullspace_OK);
   }
   
-  bool IIATester::test_hnf_solver(std::vector<int> &expected_solution, bool expect_fail)
+  bool IIATester::test_hnf_solver(std::vector<int> &expected_solution, std::vector<int> *nullspace_vector, bool expect_fail)
   {
     IIA_Internal::MatrixSparseInt B(result), U(result);
     std::vector<int> hnf_col_order;
@@ -717,19 +717,39 @@ namespace IIA_Internal
       return false;
     }
     
-    // vectors might be different length
+    // vectors might be different length, this isn't the sort of expected failure that's allowed
     // if ( col_solution.size() == expected_solution.size() &&  col_solution == expected_solution )
-    bool expected=true;
-    for (int i = 0; i <= used_col; ++i)
+    if (used_col >= (int) expected_solution.size())
     {
-      if (i>=(int)expected_solution.size() || col_solution[i]!=expected_solution[i])
-        expected = false;
+      result->error_message("HNF solution is length %d > expected %d\n", used_col, (int) expected_solution.size());
+      return false;
+    }
+    bool expected=true;
+    if (used_col>=0)
+    {
+      // if there is a nullspace vector, add it so the first-index values match
+      if (nullspace_vector && col_solution[0]!=expected_solution[0])
+      {
+        const int k = (expected_solution[0]-col_solution[0])/((*nullspace_vector)[0]);
+        for (int i = 0; i <= used_col; ++i)
+        {
+          col_solution[i] += k * (*nullspace_vector)[i];
+        }
+      }
+      // test solution == expected
+      for (int i = 0; i <= used_col; ++i)
+      {
+        if (col_solution[i]!=expected_solution[i])
+          expected = false;
+      }
     }
     if (expected)
       return true;
     
     int degrees_of_freedom = (int)B.col_rows.size() - (int)B.rows.size();
     result->warning_message("HNF solution satisfies the constraints, but is a different solution than expected. Number of rows and cols suggest %d degrees of freedom, but it may be rank or column deficient.\n",degrees_of_freedom);
+    result->info_message("%s.\n",
+                         (nullspace_vector!=nullptr ? "One nullspace vector was given and already taken into account" : "No nullspace vector was specified"));
     auto old_size = col_solution.size();
     col_solution.resize(expected_solution.size());
     result->info_message("Found solution");  print_vec(result,col_solution);
@@ -809,11 +829,14 @@ namespace IIA_Internal
     IIA0.MatrixSparseInt::fill_in_cols_from_rows();
     IIA0.rhs = {1, 2, 2, 1};
     
+    // expected solution
     std::vector<int> x0 = {4, 3, 2, 1};
-    
+    // nullspace row
+    std::vector<int> m0 = {1, 1, 1, 1};
+
     bool rref_OK1 = IIA0.test_rref_constraints();
     
-    bool HNF_OK = IIA0.test_hnf_solver(x0);
+    bool HNF_OK = IIA0.test_hnf_solver(x0,&m0);
     if (!HNF_OK)
     {
       std::cout << "ERROR: This problem has many solutions but the solver didn't find any or didn't find the expected one!\n";
@@ -833,7 +856,7 @@ namespace IIA_Internal
     std::cout << "IIATester:test_problem2 start: ";
     result.info_message("fully constrained, one solution, 4x4\n");
     //
-    // redundant constraint, as with 4 sides of a brick being mapped, but with a different b
+    // modified last row to make it non-redundant
     //  [  1 -1       ]          1
     //  |  1    -1    | = A,  b= 2  from x=[4 3 2 1], not a mapped solution
     //  |     1    -1 |          2
@@ -910,7 +933,7 @@ namespace IIA_Internal
       std::cout << "\nThe problem coefficients are designed to have no integer solution."
       " A warning like\n'WARNING: HNF no integer solution because row_sum[0] %% coeff[0] != 0:  -9 %% 4 = -1' is expected.\n";
     }
-    bool HNF_OK = IIA0.test_hnf_solver(x0,true);
+    bool HNF_OK = IIA0.test_hnf_solver(x0,nullptr,true);
     if (HNF_OK)
     {
       std::cout << "ERROR: This problem has no solution but the solver thought it found one!\n";
