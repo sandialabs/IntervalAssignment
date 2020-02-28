@@ -118,7 +118,7 @@ void test_problem_A()
   // g[0]=1
   // g[1]=4
   // expect solution [2,2]
-  std::cout << "test_problem_A start: ";
+  std::cout << "test_problem_A  start: ";
   
   IIA::IA ia;
   setup_io(ia.get_result());
@@ -135,7 +135,7 @@ void test_problem_A()
   std::vector<int> expected_solution = {2,2};
   test_solution(ia,expected_solution);
   
-  std::cout << "test_problem_A end." << std::endl;
+  std::cout << "test_problem_A  end." << std::endl;
 }
 
 
@@ -172,6 +172,33 @@ void test_problem_AA()
   std::cout << "test_problem_AA end." << std::endl;
 }
 
+void test_problem_AB()
+{
+  // test solving a single equality constraint with goals, where there is no degrees of freedom
+  // x0 = 4
+  // g[0]=1
+  // expect solution [4]
+  std::cout << "test_problem_AB start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  
+  ia.resize(1,2);
+  std::vector<int> cols = {0};
+  std::vector<int> vals = {1};
+  ia.set_row(0,cols,vals);
+  ia.set_goal(0,1);
+  ia.set_rhs(0,4);
+  ia.solve();
+  
+  test_result(ia);
+  std::vector<int> expected_solution = {4};
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_AB end." << std::endl;
+}
+
+
 void test_problem_B()
 {
   // test solving a single sum-even with goals
@@ -181,7 +208,7 @@ void test_problem_B()
   // g[2]=5
   // g[3]=0, a dummy sum-even variable
   // expect solution [1,3,6,5]
-  std::cout << "test_problem_B start: ";
+  std::cout << "test_problem_B  start: ";
   
   IIA::IA ia;
   setup_io(ia.get_result());
@@ -202,7 +229,7 @@ void test_problem_B()
   std::vector<int> expected_solution = {1,3,6,5};
   test_solution(ia,expected_solution);
   
-  std::cout << "test_problem_B end." << std::endl;
+  std::cout << "test_problem_B  end." << std::endl;
 }
 
 void test_problem_BB()
@@ -293,7 +320,7 @@ void test_problem_C()
   // g[2]=5
   // g[3]=0, a dummy sum-even variable
   // expect solution [1,3,6,5]
-  std::cout << "test_problem_C start: ";
+  std::cout << "test_problem_C  start: ";
   
   IIA::IA ia;
   setup_io(ia.get_result());
@@ -378,7 +405,7 @@ void test_problem_C()
   std::vector<int> expected_solution = {1,1,1,1,5,7,8,10,5,7,8,10,15,15};
   test_solution(ia,expected_solution);
   
-  std::cout << "test_problem_C end." << std::endl;
+  std::cout << "test_problem_C  end." << std::endl;
 }
 
 
@@ -387,7 +414,7 @@ void test_problem_D()
   // submap test
   // 0 opposite 2,4,6,8,10
   // alternating 1,3,5,7,9,11
-  std::cout << "test_problem_D start: ";
+  std::cout << "test_problem_D  start: ";
   
   IIA::IA ia;
   setup_io(ia.get_result());
@@ -425,7 +452,7 @@ void test_problem_D()
   std::vector<int> expected_solution = {5,3,1,2,1,3,1,6,1,4,1,2};
   test_solution(ia,expected_solution);
   
-  std::cout << "test_problem_D end." << std::endl;
+  std::cout << "test_problem_D  end." << std::endl;
 }
 
 void test_problem_E()
@@ -433,7 +460,7 @@ void test_problem_E()
   // submap test
   // 0 opposite 2,4,6,8,10
   // alternating 1,3,5,7,9,11
-  std::cout << "test_problem_E start: ";
+  std::cout << "test_problem_E  start: ";
   
   IIA::IA ia;
   setup_io(ia.get_result());
@@ -472,7 +499,7 @@ void test_problem_E()
   shuffle_solution(ia,expected_solution, {2,4,6,8,10} );
   test_solution(ia,expected_solution);
   
-  std::cout << "test_problem_E end." << std::endl;
+  std::cout << "test_problem_E  end." << std::endl;
 }
 
 
@@ -481,7 +508,7 @@ void test_problem_F()
   // U submap test with resolving.
   // 0 opposite 2,4,6
   // alternating 1,3,5,7
-  std::cout << "test_problem_F start: ";
+  std::cout << "test_problem_F  start: ";
   
   IIA::IA ia;
   setup_io(ia.get_result());
@@ -541,7 +568,7 @@ void test_problem_F()
     }
   }
   
-  std::cout << "test_problem_F end." << std::endl;
+  std::cout << "test_problem_F  end." << std::endl;
 }
 
 void test_problem_G()
@@ -549,7 +576,7 @@ void test_problem_G()
   // U submap test with resolving. multiple legs
   // 0 opposite 2,4,6,8,10,12,14
   // alternating 1,3,5,7,9,11,13,15
-  std::cout << "test_problem_G start: ";
+  std::cout << "test_problem_G  start: ";
   
   IIA::IA ia;
   setup_io(ia.get_result());
@@ -627,7 +654,7 @@ void test_problem_G()
   shuffle_solution(ia,expected_solution, {2,4,6,8,10,12,14} );
   test_solution(ia,expected_solution);
   
-  std::cout << "test_problem_G end." << std::endl;
+  std::cout << "test_problem_G  end." << std::endl;
 }
 
 namespace IIA_Internal
@@ -960,6 +987,7 @@ int main(int argc, const char * argv[])
   // test solving some interval assignment problem
   test_problem_A();
   test_problem_AA();
+  test_problem_AB();
   test_problem_B();
   test_problem_BB();
   test_problem_BC();

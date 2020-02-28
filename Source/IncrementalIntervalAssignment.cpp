@@ -130,6 +130,7 @@ namespace IIA_Internal
   MatrixSparseInt::MatrixSparseInt(MatrixSparseInt&M,int MaxMRow) : result(M.result)
   {
     copy(M.rows.begin(),M.rows.begin()+MaxMRow,back_inserter(rows));
+    col_rows.resize(M.col_rows.size());
     fill_in_cols_from_rows();
   }
   
@@ -847,6 +848,12 @@ namespace IIA_Internal
     vector<int>cols_fail;
     if (!bounds_satisfied(cols_fail))
     {
+      if (M.col_rows.empty())
+      {
+        result->debug_message("\nIIA: unable to find a solution that satisfies the variable bounds because the nullspace is empty.\n");
+        return false;
+      }
+
       result->debug_message("\nIIA: finding a solution that satisfies the variable bounds\n");
       bool rc(true); // set to false if we give up on any variable
                      // to do
@@ -911,94 +918,101 @@ namespace IIA_Internal
           {
             int num_block=0;
             blocking_cols.clear();
+            assert(t.c < (int) M.col_rows.size());
             auto &tc_rows=M.col_rows[t.c];
-            
-            // use rows that don't make *any* variable closer to its bounds
-            //   unique for bounds, which are often one-sided, in contrast to "improve" where we must make tradeoffs
-            //   this doesn't seem to help much, but it doesn't hurt
-            vector<int> deferred_rows;
-            const bool go_in_unbounded_directions_first = true;
-            if (go_in_unbounded_directions_first)
+            if(tc_rows.empty())
             {
-              for (int m : tc_rows )
+              give_up=true;
+            }
+            else
+            {
+              // use rows that don't make *any* variable closer to its bounds
+              //   unique for bounds, which are often one-sided, in contrast to "improve" where we must make tradeoffs
+              //   this doesn't seem to help much, but it doesn't hurt
+              vector<int> deferred_rows;
+              const bool go_in_unbounded_directions_first = true;
+              if (go_in_unbounded_directions_first)
               {
-                // a row is bounded if when we add it forever to the solution some variable bound is violated
-                auto &row = M.rows[m];
-                bool bounded = false;
-                for (size_t i = 0; i < row.cols.size(); ++i)
+                for (int m : tc_rows )
                 {
-                  auto c = row.cols[i];
-                  auto v = row.vals[i];
-                  auto dc = dx * v;
-                  if (( (dc < 0) && (col_lower_bounds[c] != numeric_limits<int>::lowest()) ) ||
-                      ( (dc > 0) && (col_upper_bounds[c] != numeric_limits<int>::max()   ) ))
+                  // a row is bounded if when we add it forever to the solution some variable bound is violated
+                  auto &row = M.rows[m];
+                  bool bounded = false;
+                  for (size_t i = 0; i < row.cols.size(); ++i)
                   {
-                    bounded = true;
-                    break;
+                    auto c = row.cols[i];
+                    auto v = row.vals[i];
+                    auto dc = dx * v;
+                    if (( (dc < 0) && (col_lower_bounds[c] != numeric_limits<int>::lowest()) ) ||
+                        ( (dc > 0) && (col_upper_bounds[c] != numeric_limits<int>::max()   ) ))
+                    {
+                      bounded = true;
+                      break;
+                    }
                   }
-                }
-                if (bounded)
-                {
-                  deferred_rows.push_back(m);
-                }
-                else
-                {
-                  // debug
-                  // result->error_message("Found a case where unbounded works!\n");
-                  if (result->log_debug)
+                  if (bounded)
                   {
-                    result->debug_message("row %d unbounded ",(int)m);
-                    row.print_row(result);
+                    deferred_rows.push_back(m);
                   }
-                  // debug
-                  
-                  // accept_strict_improvement is overkill and inefficient in this case, but it works
+                  else
+                  {
+                    // debug
+                    // result->error_message("Found a case where unbounded works!\n");
+                    if (result->log_debug)
+                    {
+                      result->debug_message("row %d unbounded ",(int)m);
+                      row.print_row(result);
+                    }
+                    // debug
+                    
+                    // accept_strict_improvement is overkill and inefficient in this case, but it works
+                    bool self_block = false;
+                    int self_block_coeff = 0;
+                    if (accept_strict_improvement(Q, val_bounds_Q, threshold, nullptr, 0., t.c, M.rows[m], dx,
+                                                  self_block, self_block_coeff, blocking_cols, num_block, improved_cols))
+                    {
+                      fixed=true;
+                      break;
+                    }
+                    else
+                    {
+                      result->error_message("Incremental Interval Assignment algorithm error. The row was unbounded but was somehow blocked, a contradiction.\n");
+                    }
+                  }
+                } // for tc_rows
+              }
+              
+              // look for any row that works
+              if (!fixed)
+              {
+                for (size_t m : (go_in_unbounded_directions_first ? deferred_rows : tc_rows) )
+                {
                   bool self_block = false;
                   int self_block_coeff = 0;
+                  // satisfy bounds
                   if (accept_strict_improvement(Q, val_bounds_Q, threshold, nullptr, 0., t.c, M.rows[m], dx,
                                                 self_block, self_block_coeff, blocking_cols, num_block, improved_cols))
                   {
                     fixed=true;
                     break;
                   }
+                  else if (self_block)
+                  {
+                    result->debug_message("row %d selfblocks col %d\n",(int)m,t.c);
+                    // give up later on this variable if it's not possible to get a combination with a smaller coefficient
+                    smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
+                    
+                    // give up immediately if the increment is the smallest it could be
+                    if (smallest_self_block_coeff==1)
+                    {
+                      give_up=true;
+                      break;
+                    }
+                  }
                   else
                   {
-                    result->error_message("Incremental Interval Assignment algorithm error. The row was unbounded but was somehow blocked, a contradiction.\n");
+                    result->debug_message("row %d blocked\n",(int)m);
                   }
-                }
-              } // for tc_rows
-            }
-            
-            // look for any row that works
-            if (!fixed)
-            {
-              for (size_t m : (go_in_unbounded_directions_first ? deferred_rows : tc_rows) )
-              {
-                bool self_block = false;
-                int self_block_coeff = 0;
-                // satisfy bounds
-                if (accept_strict_improvement(Q, val_bounds_Q, threshold, nullptr, 0., t.c, M.rows[m], dx,
-                                              self_block, self_block_coeff, blocking_cols, num_block, improved_cols))
-                {
-                  fixed=true;
-                  break;
-                }
-                else if (self_block)
-                {
-                  result->debug_message("row %d selfblocks col %d\n",(int)m,t.c);
-                  // give up later on this variable if it's not possible to get a combination with a smaller coefficient
-                  smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
-                  
-                  // give up immediately if the increment is the smallest it could be
-                  if (smallest_self_block_coeff==1)
-                  {
-                    give_up=true;
-                    break;
-                  }
-                }
-                else
-                {
-                  result->debug_message("row %d blocked\n",(int)m);
                 }
               }
             }
@@ -1437,6 +1451,12 @@ namespace IIA_Internal
   
   void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxMrow, MatrixSparseInt&N)
   {
+    if (M.col_rows.empty())
+    {
+      result->debug_message("IIA: unable to improve_solution because nullspace is empty\n.");
+      return;
+    }
+    
     // debug data
     CpuTimer *timer(nullptr), *timer_0(nullptr), *timer_1(nullptr), *accept_timer(nullptr);
     
@@ -1569,50 +1589,58 @@ namespace IIA_Internal
         {
           blocking_cols.clear();
           int num_block=0;
+          assert(t.c < (int) M.col_rows.size());
           auto &tc_rows=M.col_rows[t.c];
-          for (size_t m : tc_rows )
+          if(tc_rows.empty())
           {
-            // debug
-            if (result->log_debug)
+            give_up=true;
+          }
+          else
+          {
+            for (size_t m : tc_rows )
             {
-              ++accept_calls;
-              accept_timer->cpu_secs();
-            }
-            
-            //improve_solution
-            bool self_block = false;
-            int self_block_coeff = 0;
-            const bool worked = accept_strict_improvement(Q,
-                                                          quality_fn, quality_threshold,
-                                                          &constraint_fn, constraint_threshold,
-                                                          t.c, M.rows[m], dx,
-                                                          self_block, self_block_coeff, blocking_cols, num_block, improved_cols);
-            
-            // debug time
-            if (result->log_debug)
-            {
-              accept_time+=accept_timer->cpu_secs();
-            }
-            
-            if (worked)
-            {
-              // don't add blocking_cols to all_blocking_cols_all: we didn't eliminate them, because it wasn't needed.
-              fixed=true;
-              break;
-            }
-            else if (self_block)
-            {
-              // give up later on this variable if it's not possible to get a combination with a smaller coefficient
-              smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
-              
-              // give up immediately if the increment is the smallest it could be
-              if (smallest_self_block_coeff==1)
+              // debug
+              if (result->log_debug)
               {
-                give_up=true;
+                ++accept_calls;
+                accept_timer->cpu_secs();
+              }
+              
+              //improve_solution
+              bool self_block = false;
+              int self_block_coeff = 0;
+              const bool worked = accept_strict_improvement(Q,
+                                                            quality_fn, quality_threshold,
+                                                            &constraint_fn, constraint_threshold,
+                                                            t.c, M.rows[m], dx,
+                                                            self_block, self_block_coeff, blocking_cols, num_block, improved_cols);
+              
+              // debug time
+              if (result->log_debug)
+              {
+                accept_time+=accept_timer->cpu_secs();
+              }
+              
+              if (worked)
+              {
+                // don't add blocking_cols to all_blocking_cols_all: we didn't eliminate them, because it wasn't needed.
+                fixed=true;
                 break;
               }
-            }
-          } // for
+              else if (self_block)
+              {
+                // give up later on this variable if it's not possible to get a combination with a smaller coefficient
+                smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
+                
+                // give up immediately if the increment is the smallest it could be
+                if (smallest_self_block_coeff==1)
+                {
+                  give_up=true;
+                  break;
+                }
+              }
+            } // for
+          }
         }
         
         // debug
@@ -4617,6 +4645,7 @@ namespace IIA_Internal
       auto &cols = rows[r].cols;
       for (auto c : cols)
       {
+        assert(c<(int)col_rows.size());
         col_rows[c].push_back(r);
         used_col=max(used_col,c);
       }
@@ -4642,7 +4671,8 @@ namespace IIA_Internal
         max_col = max( max_col, int(c) );
       }
     }
-    col_rows.resize(max_col+1);
+    if (max_col >= (int)col_rows.size())
+      col_rows.resize(max_col+1);
     
     // fill in data
     for (size_t r=0; r<rows.size(); ++r)
