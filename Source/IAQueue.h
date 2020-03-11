@@ -155,7 +155,16 @@ namespace IIA_Internal
   public:
     void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
-  
+
+  // in order of increasing number of coefficients = number of rows the variable appears in
+  class SetValuesNumCoeffV2: public SetValuesFn
+  {
+  public:
+    SetValuesNumCoeffV2() {}
+  public:
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
+  };
+
   // pick column to eliminate in rref, that has a small coeff, is in few rows, and is long
   class SetValuesCoeffRowsGoal: public SetValuesFn
   {
@@ -164,7 +173,16 @@ namespace IIA_Internal
   public:
     void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
-  
+
+// pick column to eliminate in rref, that has a small coeff, is in few rows, rows are short, and is long
+class SetValuesCoeffRowsGoalVB: public SetValuesFn
+{
+public:
+  SetValuesCoeffRowsGoalVB() {}
+public:
+  void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
+};
+
   // true if A<B by lexicographic min max
   bool is_better( vector<QElement> &qA, vector<QElement> &qB);
   
@@ -183,8 +201,8 @@ namespace IIA_Internal
     
     // update the Q
     // cols are the indices of the columns that have changed
-    // col_solution is the new solution of the IncrementalIntervalAssignment
-    void update(const vector<int> &cols);
+    // if changed_solution_only, then we only update elements whose col_solution has changed
+    void update(const vector<int> &cols, bool changed_solution_only = true);
     
     bool empty() {return Q.empty();}
     

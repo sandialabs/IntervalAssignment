@@ -176,10 +176,20 @@ namespace IIA_Internal
         
         auto &dummy_rows = col_rows[c];
         if (dummy_rows.empty())
+        {
+          result->debug_message("dummy x%d adjustment skipped because it isn't in any row\n", c);
           continue;
+        }
+
+        // we only assign it based on the first row its in
+        // if there is more than one dummy variable with different coefficients, we could take a second pass to try to satisfy it
+        //   fill in if it helps a customer problem
+
+        int old_val = col_solution[c];
         
         // assign col_solution[c]
         int r = dummy_rows[0];
+        col_solution[c]=0;
         int sum = row_sum(r);
         int dummy_coeff = get_M(r,c);
         col_solution[c] = -sum/dummy_coeff;
@@ -187,8 +197,11 @@ namespace IIA_Internal
         {
           // round col_solution up, as this causes less issues with lower bounds
           ++col_solution[c];
-          // if there is more than one dummy variable with different coefficients, we could take a second pass to try to satisfy it
-          //   fill in if it helps a customer problem
+        }
+        if (result->log_debug)
+        {
+          print_row_iia(r);
+          result->debug_message("dummy x%d changed from %d to %d based on row %d sum %d\n", c, old_val, col_solution[c], r, sum);
         }
       }
     }
@@ -295,12 +308,15 @@ namespace IIA_Internal
       result->info_message("%d variables were removed and tied to %d variables\n", num_tied, num_tied_to);
       for (int c=0; (size_t) c<tied_variables.size(); ++c)
       {
-        result->info_message("%d tied :",c);
-        for (auto c2 : tied_variables[c])
+        if (!tied_variables[c].empty())
         {
-          result->info_message(" %d",c2);
+          result->info_message("%d tied :",c);
+          for (auto c2 : tied_variables[c])
+          {
+            result->info_message(" %d",c2);
+          }
+          result->info_message("\n");
         }
-        result->info_message("\n");
       }
     }
     // debug
@@ -829,7 +845,7 @@ namespace IIA_Internal
       result->debug_message("Q being emptied.\n");
       Q = priority_queue<QElement>();
     }
-    result->debug_message("Q tip top %d values %g %g, remaining Q size %d\n", t.c, t.valueA, t.valueB, (int) Q.size());
+    result->debug_message("Q tip top %d values A:%g B:%g C:, remaining Q size %d\n", t.c, t.valueA, t.valueB, t.valueC, (int) Q.size());
     
     return false;
   }
@@ -1197,7 +1213,8 @@ namespace IIA_Internal
         result->error_message("IIA bounds algorithm failure. The Q never got stuck, but the bounds were still not satisfied at the end.\n");
       
     }
-    result->debug_message("\nIIA: initial solution already satisfies the variable bounds\n");
+    else
+      result->debug_message("\nIIA: initial solution already satisfies the variable bounds\n");
     
     // debug
     if (result->log_debug)
@@ -2159,8 +2176,9 @@ namespace IIA_Internal
         result->debug_message("IIA dependent var x%d = %d/%d != integer. Rounding up.\n",
                               col_dep, -sum, coeff_dep);
       }
-      result->debug_message("IIA Assigning dependent var x%d = %d/%d = %d\n",
-                            col_dep, -sum, coeff_dep, col_solution[col_dep]);
+      result->debug_message("IIA Assigning dependent var x%d = %d/%d = %d%s\n",
+                            col_dep, -sum, coeff_dep, col_solution[col_dep],
+                            (col_solution[col_dep]<col_lower_bounds[col_dep] || col_solution[col_dep]>col_solution[col_dep]) ? " out of bounds!" : "");
     }
     if (result->log_debug)
     {
@@ -2760,12 +2778,12 @@ namespace IIA_Internal
         
         matrix_allrows_eliminate_column(r, lead);
         
-        if (result->log_debug)
-        {
-          result->debug_message("Done reducing row %d and col %d\n",r,lead);
-          print_matrix("done row col");
-          // print_matrix_summary("done row col");
-        }
+        //        if (result->log_debug)
+        //        {
+        //          result->debug_message("Done reducing row %d and col %d\n",r,lead);
+        //          print_matrix("done row col");
+        //          // print_matrix_summary("done row col");
+        //        }
         
         // sanity check
         assert( col_rows[lead].size()==1 && col_rows[lead][0]==r);
@@ -2902,7 +2920,7 @@ namespace IIA_Internal
       }
       else
       {
-        result->warning_message("IIA: Gaussian elimination to both reduce_coefficient and fix blocking cols is not implemented.\n");
+        result->debug_message("IIA: Gaussian elimination to both reduce_coefficient and fix blocking cols is not implemented.\n");
       }
     }
     
@@ -3052,8 +3070,7 @@ namespace IIA_Internal
   
   bool IncrementalIntervalAssignment::rref_elim(int &r, int rr, int c, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
-    const bool do_print = false; // debug bool do_print = (c==1354);
-    if (do_print) result->debug_message(" rref filling in row %d (diagonal is col %d) ", r, c );
+    // result->debug_message(" rref filling in row %d (diagonal is col %d) ", r, c );
     
     row_swap(r,rr); // now we're working on r, not rr
     
@@ -3075,14 +3092,6 @@ namespace IIA_Internal
       rhs[r]=-rhs[r];
       // print_problem("RREF post negating row " +to_string(r) + " to make column " + to_string(c) + " entry positive ");
     }
-    
-    // debug
-    if (do_print && result->log_debug)
-    {
-      result->info_message("rref_elim row %d ",r);
-      rows[r].print_row(result);
-    }
-    // debug
     
     // next row
     ++r;
@@ -3191,7 +3200,54 @@ namespace IIA_Internal
     }
     return true;
   }
+
+bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
+{
+  result->debug_message("rref_step_numrowsV2\n");
+  priority_queue<QElement> Q;
+  SetValuesNumCoeffV2 val_NumCoeff;
+  vector<int>all_vars(used_col+1);
+  iota(all_vars.begin(),all_vars.end(),0);
+  const double threshold=numeric_limits<double>::lowest(); // anything is fine
+  build_Q(Q, val_NumCoeff, threshold, all_vars);
   
+  QElement t;
+  while (!Q.empty())
+  {
+    if (tip_top(Q, val_NumCoeff, threshold, t))
+      return true;
+    
+    const int c = t.c;
+    // find an unreduced row with a smallest coefficient
+    int cr = -1;
+    int best_coeff = 0;
+    for ( auto r : col_rows[c] )
+    {
+      if (r>=rref_r)
+      {
+        row_simplify(r);
+        auto coeff = abs(rows[r].get_val(c));
+        if (cr==-1 || coeff<best_coeff)
+        {
+          cr=r;
+          best_coeff=coeff;
+        }
+      }
+    }
+    if (cr==-1) // e.g. -1 means no unreduced row had a non-zero coeff, can't use this variable
+      continue;
+    
+    assert(cr>=rref_r);
+    if (!rref_elim(rref_r, cr, c, rref_col_order, rref_col_map))
+      return false;
+    row_simplify(rref_r-1);
+    
+    if (rref_r>used_row)
+      return true;
+  }
+  return true;
+}
+
   bool IncrementalIntervalAssignment::rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
     if (rref_r>used_row)
@@ -3291,6 +3347,162 @@ namespace IIA_Internal
             return true;
           
           progress_since_pushback=true;
+        }
+      }
+      // try again with the left-over vars, if any
+      if (all_vars.empty() || !progress_since_pushback)
+        return true;
+    }
+    return true;
+  }
+  
+  
+  bool IncrementalIntervalAssignment::rref_step1VB(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
+  {
+    if (rref_r>used_row)
+      return true;
+    
+    result->debug_message("rref_step1VB\n");
+    
+    SetValuesCoeffRowsGoalVB val_CoeffRowsGoal_Q;
+    QWithReplacement Q(this, val_CoeffRowsGoal_Q, numeric_limits<double>::lowest()/4);
+
+    vector<int>all_vars;
+    all_vars.reserve(used_col+1);
+    for (int c=0; c<=used_col; ++c)
+    {
+      if (rref_col_map[c]==-1)
+        all_vars.push_back(c);
+    }
+
+    // workspace
+    set<int> changed_var_set;
+    vector<int>update_var;
+
+    for (;;)
+    {
+      Q.build(all_vars);
+      
+      if (Q.empty())
+        return true;
+      
+      all_vars.clear();
+      
+      result->debug_message("Trying %d candidate columns\n",(int)Q.size());
+      
+      bool progress_since_pushback=false;
+      QElement t;
+      while (!Q.empty() && rref_r<=used_row)
+      {
+        if (Q.tip_top(t))
+          break;
+        
+        const int c = t.c;
+
+        // skip if already reduced, isn't in any row, or all the rows its in are reduced already
+        if (rref_col_map[c]>0 || col_rows[c].empty() || col_rows[c].back() < rref_r)
+          continue;
+
+        // result->info_message("processing t, col %d, valA %g, valB %g, valC %g\n",t.c,t.valueA,t.valueB,t.valueC);
+        
+        // rr row to move into r
+        // find the one with a lead coeff of 1 if any, and prefer the shortest row
+        int rr=-1;
+        for (int rrr : col_rows[c])
+        {
+          if (rrr<rref_r)
+            continue;
+          if (abs(rows[rrr].get_val(c))==1)
+          {
+            if (rr==-1 || rows[rrr].cols.size() < rows[rr].cols.size())
+            {
+              rr=rrr;
+            }
+          }
+        }
+        if (rr==-1)
+        {
+          // we may just need to row_simplify
+          for (int rrr : col_rows[c])
+          {
+            if (rrr<rref_r)
+              continue;
+            row_simplify(rrr);
+            if (abs(rows[rrr].get_val(c))==1)
+            {
+              if (rr==-1 || rows[rrr].cols.size() < rows[rr].cols.size())
+              {
+                rr=rrr;
+              }
+            }
+          }
+        }
+        if (rr==-1)
+        {
+          // try again later
+          
+          // debug
+          if (result->log_debug)
+          {
+            result->debug_message("skipping %d in %d rows for now, no 1 coefficient in a pivot row anymore\n",c,(int)col_rows[c].size());
+            for (auto s : col_rows[c])
+            {
+              if (s<rref_r)
+                result->info_message("*");
+              else if (s==rr)
+                result->info_message("+");
+              else
+                result->info_message("-");
+              print_row_iia(s);
+            }
+          }
+          //debug
+          
+          if (all_vars.empty())
+            progress_since_pushback=false;
+          all_vars.push_back(c);
+        }
+        else
+        {
+          // debug
+          if (result->log_debug)
+          {
+            result->debug_message("elim %d from %d rows\n",c,(int)col_rows[c].size()-1);
+            for (auto s : col_rows[c])
+            {
+              if (s<rref_r)
+                result->info_message("*");
+              else if (s==rr)
+                result->info_message("+");
+              else
+                result->info_message("-");
+              print_row_iia(s);
+            }
+          }
+          
+          // changed_vars that we need to update the priority for
+          changed_var_set.clear();
+          for (auto r : col_rows[c])
+          {
+            changed_var_set.insert(rows[r].cols.begin(),rows[r].cols.end());
+          }
+            
+          if(!rref_elim(rref_r, rr, c, rref_col_order, rref_col_map))
+            return false;
+          
+          if (rref_r>used_row)
+            return true;
+          
+          progress_since_pushback=true;
+          
+          // update variables
+          update_var.clear();
+          for (auto c : changed_var_set )
+          {
+            if (rref_col_map[c]<0 && !col_rows[c].empty() && col_rows[c].back() >= rref_r)
+              update_var.push_back(c);
+          }
+          Q.update( update_var, false );
         }
       }
       // try again with the left-over vars, if any
@@ -3525,7 +3737,8 @@ namespace IIA_Internal
     
     // Step 1
     // Use any var that has a "1" for a coefficient in a row, prefering those with fewer rows
-    if (!rref_step1(rref_r, rref_col_order, rref_col_map))
+    // if (!rref_step1(rref_r, rref_col_order, rref_col_map))
+    if (!rref_step1VB(rref_r, rref_col_order, rref_col_map))
       return false;
     
     // Step 2
@@ -3560,8 +3773,9 @@ namespace IIA_Internal
     int rref_r=0; // next row to reduce
     
     // Step 0
-    // pick ones in fewer columns
-    if (!rref_step_numrows(rref_r, rref_col_order, rref_col_map))
+    // pick ones in fewer rows
+//     if (!rref_step_numrows(rref_r, rref_col_order, rref_col_map))
+    if (!rref_step_numrowsV2(rref_r, rref_col_order, rref_col_map))
       return false;
     
     // Step (end) Last Resort, safety, left-overs
@@ -5001,7 +5215,7 @@ namespace IIA_Internal
 
   void IncrementalIntervalAssignment::identify_col_type()
   {
-    for (int c = 0; c < used_col; ++c)
+    for (int c = 0; c <= used_col; ++c)
     {
       // INT_VARS have a goal, and usually a positive lower bound
       // DUMMY_VARS have no goal, and arbitrary bounds
@@ -5349,7 +5563,7 @@ namespace IIA_Internal
         const auto solve_sub_time=solve_timer.cpu_secs();
         solve_time+=solve_sub_time;
         result->info_message("Subproblem %d of %d size %d X %d time = %f (%f total)\n\n",
-                             num_subs-i, num_subs, sub_problem->used_row+1, sub_problem->used_col+1, solve_sub_time, solve_time);
+                             i+1, num_subs, sub_problem->used_row+1, sub_problem->used_col+1, solve_sub_time, solve_time);
       }
     }
 
@@ -5367,7 +5581,15 @@ namespace IIA_Internal
   
   void IncrementalIntervalAssignment::print_row_iia(size_t r) const
   {
-    result->info_message("  %d row: ", (int) r);
+    if (parentProblem)
+    {
+      int pr = parentRows[r];
+      result->info_message("  %d (p%d) row: ", (int) r, pr);
+    }
+    else
+    {
+      result->info_message("  %d row: ", (int) r);
+    }
     auto &row=rows[r];
     auto &cols=row.cols;
     auto &vals=row.vals;
@@ -5460,7 +5682,13 @@ namespace IIA_Internal
     result->info_message("Column values\n");
     for (size_t c=0; (int) c <= used_col && c < col_rows.size(); ++c)
     {
-      result->info_message("  x%d col", (int) c);
+      if (parentProblem)
+      {
+        int pc = parentCols[c];
+        result->info_message("  x%d (p%d) col", (int) c, pc);
+      }
+      else
+        result->info_message("  x%d col", (int) c);
       result->info_message(" bounds=[%s,%s], goal=%f, solution=%d",
                            (numeric_limits<int>::lowest() == col_lower_bounds[c] ? "-inf" : to_string(col_lower_bounds[c]).c_str()),
                            (numeric_limits<int>::max()    == col_upper_bounds[c] ? "+inf" : to_string(col_upper_bounds[c]).c_str()),
@@ -5639,7 +5867,7 @@ namespace IIA_Internal
           {
             if (col_type[cc]==EVEN_VAR)
             {
-              result->debug_message("IncrementalIntervalAssignment::recursively_add_edge: column %d is a sum-even so skipping row %d.\n", cc, row );
+              // result->debug_message("IncrementalIntervalAssignment::recursively_add_edge: column %d is a sum-even so skipping row %d.\n", cc, row );
               do_add = false;
               break;
             }

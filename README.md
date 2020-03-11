@@ -32,7 +32,7 @@ IIA process outline
 4. min lex f(x) by adding linear combinations of N to x3, in downhill directions constrained by [lo,hi], to output x4. (can fail)
 Steps 1-4 are performed over (semi) independent subproblems and recombined for the global solution.
 
-The main source of non-robustness is finding linear combinations of N that point in downhill directions. The heuristic is based on Gaussian elimination to avoid uphill directions. We save uphill directions found in previous searches, so the search is not exhaustive. This keeps running time low (sub-exponential) but can cause the algorithm to terminate with a sub-optimal solution, and possibly one that does not satisfy x in [lo,hi].
+The main source of non-robustness is finding linear combinations of N that point in downhill directions. The heuristic is based on Gaussian elimination to avoid uphill directions. We save uphill directions found in previous searches, and the search is not exhaustive. This keeps running time low (sub-exponential) but can cause the algorithm to terminate with a sub-optimal solution, and possibly one that does not satisfy x in [lo,hi].
 
 
 == Why Use It?

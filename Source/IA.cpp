@@ -92,6 +92,18 @@ namespace IIA
   {
     return ia->num_cols();
   }
+  int IA::used_rows() const
+  {
+    return ia->num_used_rows();
+  }
+  int IA::used_cols() const
+  {
+    return ia->num_used_cols();
+  }
+  std::pair<int, int> IA::used() const
+  {
+    return std::make_pair(used_rows(),used_cols());
+  }
   int IA::next_row()
   {
     return ia->next_available_row();
@@ -179,6 +191,15 @@ namespace IIA
   {
     return ia->get_M_unsorted(row,col);
   }
+  void IA::get_col(int col, const std::vector<int> *&rows) const
+  {
+    ia->get_rows(col, rows);
+  }
+  void IA::fill_in_cols_from_rows()
+  {
+    ia->fill_in_cols_from_rows();
+  }
+
   ConstraintType IA::get_constraint(int row) const
   {
     return ia->get_constraint(row);

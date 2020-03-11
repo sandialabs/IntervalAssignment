@@ -112,11 +112,18 @@ namespace IIA
     std::pair<size_t, size_t> size()      const;
     size_t                    size_rows() const;
     size_t                    size_cols() const;
+    std::pair<int, int> used()      const;
+    int                 used_rows() const;
+    int                 used_cols() const;
     
     //    A
     void get_row    (int row, const std::vector<int> *&cols, const std::vector<int> *&vals) const;
     int  get_row_col(int row, int col) const;
-    
+
+    // get_col only works after "solve" or "fill_in_cols_from_rows" has been called. Use get_row_col instead.
+    void get_col    (int col, const std::vector<int> *&rows) const;
+    void fill_in_cols_from_rows();
+
     //   "="
     ConstraintType get_constraint(int row) const;
     

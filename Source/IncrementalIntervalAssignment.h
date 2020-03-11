@@ -177,6 +177,8 @@ namespace IIA_Internal
     // problem size
     int num_rows() const {return number_of_rows;}
     int num_cols() const {return number_of_cols;}
+    int num_used_rows() const {return used_row+1;}
+    int num_used_cols() const {return used_col+1;}
     // keeps track of how many rows and columns we will allocate when we freeze size
     void reserve_cols( int num_cols );
     void reserve_rows( int num_rows );
@@ -199,7 +201,14 @@ namespace IIA_Internal
     void   set_M( int row, int col, int val ); // doesn't rely on entries being sorted, may be slow
     void   set_M( int row,  vector<int> &cols, vector<int> &vals ); // modifes rows and cols
     void clear_M(int row); // clear the entries of this row. col_rows is invalid
-    
+
+    // only works after solve or fill_in_cols_from_rows has been called
+    void get_rows(int col, const vector<int> *&rows) const { rows = &col_rows[col]; };
+
+    // build the columns from the row data.
+    //   It is called once automatically near the start of solve, or can be called explicitly if the caller needs get_rows often
+    void fill_in_cols_from_rows();
+
     // type of constraint for each row, =, <=, >=, EVEN,...
     void set_constraint(int row, ConstraintType constraint_type);
     ConstraintType get_constraint(int row) const {return constraint[row];}
@@ -322,11 +331,7 @@ namespace IIA_Internal
     // return the non-zeros values of the matrix in column c
     //   we don't store these, so lookup takes a little bit of time
     vector<int> column_coeffs(int c) const;
-    
-    // build the columns from the row data.
-    // Call once after the problem is fixed and rows are sorted
-    void fill_in_cols_from_rows();
-    
+        
     // sort each row's vector of cols and vals, by increasing cols (column index)
     //   skips rows <row_start
     void sort_rows(int row_start);
@@ -354,10 +359,12 @@ namespace IIA_Internal
     // various priorities for choosing next row to call rref_elim
     bool rref_step0(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
+    bool rref_step1VB(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_step2(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_stepZ(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_step_numrows(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
-    
+    bool rref_step_numrowsV2(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
+
     void row_swap(int r, int s);
     // void col_swap(int c, int d); // this messes up the layout of IntVars and dummies, instead keep a new order in a vector
     
@@ -556,7 +563,9 @@ namespace IIA_Internal
     friend class SetValuesRatio;
     friend class SetValuesOneCoeff;
     friend class SetValuesNumCoeff;
+    friend class SetValuesNumCoeffV2;
     friend class SetValuesCoeffRowsGoal;
+    friend class SetValuesCoeffRowsGoalVB;
   };
   
   inline

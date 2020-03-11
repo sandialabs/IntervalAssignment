@@ -44,3 +44,17 @@ to do (x = done)
   export a few monster problems (heat sink) from cubit
 
  paperwork to release it
+
+
+some links to sites to reference or look at in more depth:
+https://sites.math.rutgers.edu/~sk1233/courses/ANT-F14/lec3.pdf
+https://sites.math.rutgers.edu/~sk1233/courses/ANT-F14/lec4.pdf
+
+if we ever need the determinant
+https://en.wikipedia.org/wiki/Adjugate_matrix
+https://www.engr.colostate.edu/~thompson/hPage/CourseMat/Tutorials/CompMethods/doolittle.pdf
+https://en.wikipedia.org/wiki/Crout_matrix_decomposition
+https://www.geeksforgeeks.org/l-u-decomposition-system-linear-equations/
+
+convert xcode projec to CMakeLists.txt
+https://github.com/mulle-nat/mulle-xcode-to-cmake

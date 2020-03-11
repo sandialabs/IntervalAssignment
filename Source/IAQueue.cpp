@@ -314,9 +314,9 @@ namespace  IIA_Internal
       if (fabs(qe.valueB)!=1)
       {
         // sum-even with coefficient 2, don't want to pick it
-        qe.valueA = numeric_limits<int>::lowest()/4; // will never get picked, even if it is in only one row
+        qe.valueA = numeric_limits<double>::lowest()/4; // will never get picked, even if it is in only one row
       }
-      qe.valueC = numeric_limits<int>::max()/2; // highly desirable: weak bounds, don't care quality, OK if in many nullspace rows
+      qe.valueC = numeric_limits<double>::max()/2; // highly desirable: weak bounds, don't care quality, OK if in many nullspace rows
     }
     else // constraint slack variable
     {
@@ -325,23 +325,158 @@ namespace  IIA_Internal
       if (iia.col_lower_bounds[c]==iia.col_upper_bounds[c])
       {
         // undesireable, highly constrained to a single value. want it to be independent so it's isolated in its own nullspace row, not dependent on any other slacks
-        qe.valueA = numeric_limits<int>::lowest()/2; // this way it will never get picked, even if it is in only one row
+        qe.valueA = numeric_limits<double>::lowest()/2; // this way it will never get picked, even if it is in only one row
       }
       qe.valueC = -1;
     }
   }
   
+  void SetValuesNumCoeffV2::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
+  {
+    // in only one row? pick it
+    // number of non-one coefficients in all its rows (set union), fewer is better
+    //
+    // larger goal
+    
+    
+    
+    // valuesA = -number of coefficients
+    // valuesB = -smallest coefficient magnitude
+    // valuesC = larger goal (because if these are in fewer rref rows then they end up in more nullspace vectors)
+    
+    // exceptions for different types of variables: edge; sum-even coeff 2, sum-even coeff 1; slack equality, slack inequality.
+    
+    const int c = qe.c;
+    // valueA
+    qe.valueA = - ((int) iia.col_rows[c].size()); // number of rows
+    
+    // valueAA
+    if ( qe.valueA < -1) // if in more than one row...
+    {
+      // number of non-sum-even vars in its rows, or vars with a non-one coefficient
+      std::set<int> sum_evens;
+      for (auto r : iia.col_rows[c])
+      {
+        for (auto c : iia.rows[r].cols )
+        {
+          if (iia.col_type[c]==IncrementalIntervalAssignment::EVEN_VAR)
+          {
+            sum_evens.insert(c);
+          }
+        }
+        for (auto v : iia.rows[r].vals )
+        {
+          if (abs(v)>1)
+          {
+            sum_evens.insert(c);
+          }
+        }
+      }
+      qe.valueA -= 2*sum_evens.size();
+    }
+    
+    // valueB
+    {
+      int smallest_coeff = numeric_limits<int>::max();
+      for (auto r : iia.col_rows[c])
+      {
+        const int c_coeff = abs(iia.rows[r].get_val(c));
+        smallest_coeff = min( smallest_coeff, c_coeff );
+      }
+      qe.valueB = -smallest_coeff;
+    }
+    // valueC
+    auto ctype = iia.col_type[c];
+    if (ctype==IncrementalIntervalAssignment::INT_VAR)
+    {
+      double glo, ghi;
+      iia.compute_tied_goals(c,glo,ghi);
+      qe.valueC=glo; // prefer longer ones
+    }
+    else if (ctype==IncrementalIntervalAssignment::EVEN_VAR)  // sum-even
+    {
+      if (fabs(qe.valueB)!=1)
+      {
+        // sum-even with coefficient 2, don't want to pick it
+        qe.valueA = numeric_limits<double>::lowest()/4; // will never get picked, even if it is in only one row
+      }
+      qe.valueC = numeric_limits<double>::max()/2; // highly desirable: weak bounds, don't care quality, OK if in many nullspace rows
+    }
+    else // constraint slack variable
+    {
+      // distinguish equality slack (bad to pick) from inequality slack (OK to pick)
+      // equality slack
+      if (iia.col_lower_bounds[c]==iia.col_upper_bounds[c])
+      {
+        // undesireable, highly constrained to a single value. want it to be independent so it's isolated in its own nullspace row, not dependent on any other slacks
+        qe.valueA = numeric_limits<double>::lowest()/2; // this way it will never get picked, even if it is in only one row
+      }
+      qe.valueC = -1;
+    }
+  }
+
+
+void SetValuesCoeffRowsGoalVB::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
+{
+  // if smallest coeff != 1, then valuesA = -inf
+  // valuesA = -number of rows it appears in, fewer is better
+  // valuesB = -number of variables in its rows, smaller is better
+  // valuesC = has a goal of 0 (is a slack variable), secondarily prefer variables with a larger goal (to be dependent variables, leaving the ones with small goals to be the independent ones)
+  qe.valueA=0.;
+  qe.valueB=0.;
+  qe.valueC=0.;
+  
+  const int c = qe.c;
+
+  int best_coeff=numeric_limits<int>::max();
+  for (int r : iia.col_rows[c])
+  {
+    const int c_coeff = abs(iia.rows[r].get_val(c));
+    if (c_coeff<best_coeff)
+    {
+      best_coeff=c_coeff;
+    }
+  }
+  if (best_coeff != 1)
+  {
+    qe.valueA = numeric_limits<double>::lowest()/2;
+    return;
+  }
+
+  // number of rows
+  auto &rows = iia.col_rows[c];
+  qe.valueA = - ((double)rows.size());
+  
+  // number vars of in its rows
+  std::set<int> vars;
+  for (auto r : rows )
+  {
+    vars.insert( iia.rows[r].cols.begin(), iia.rows[r].cols.end() );
+  }
+  qe.valueB = - ((double) vars.size());
+  
+  double glo, ghi;
+  iia.compute_tied_goals(c,glo,ghi);
+  qe.valueC = (glo==0. ? numeric_limits<double>::max()/2 : glo);
+}
+
+
   void SetValuesCoeffRowsGoal::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
-    // valuesA = value of smallest coefficient
-    // valuesB = number of rows it appears in
+    // valuesA = -value of smallest coefficient
+    // valuesB = -number of rows it appears in
     // valuesC = has a goal of 0 (is a slack variable), secondarily prefer variables with a larger goal (to be dependent variables, leaving the ones with small goals to be the independent ones)
     qe.valueA=0.;
     qe.valueB=0.;
     qe.valueC=0.;
     
     const int c = qe.c;
-    qe.valueB = iia.col_rows[c].size();
+    if (iia.col_rows[c].empty())
+    {
+      qe.valueA=numeric_limits<double>::lowest();
+      return;
+    }
+    qe.valueB = - (double) iia.col_rows[c].size();
     int best_coeff=numeric_limits<int>::max();
     for (int r : iia.col_rows[c])
     {
@@ -354,7 +489,7 @@ namespace  IIA_Internal
     qe.valueA=-best_coeff;
     double glo, ghi;
     iia.compute_tied_goals(c,glo,ghi);
-    qe.valueC = (glo==0. ? numeric_limits<int>::max()/2 : glo);
+    qe.valueC = (glo==0. ? numeric_limits<double>::max()/2 : glo);
   }
   
   
@@ -381,7 +516,7 @@ namespace  IIA_Internal
     return false;
   }
   
-  void QWithReplacement::update(const vector<int> &cols)
+  void QWithReplacement::update(const vector<int> &cols, bool changed_solution_only)
   {
     if (/* DISABLES CODE */ (0) && iia->get_result()->log_debug)
     {
@@ -398,7 +533,7 @@ namespace  IIA_Internal
         add(c);
       }
       // column was in the queue, and solution changed
-      else if (it->second.solution != iia->get_solution(c))
+      else if ( !changed_solution_only || it->second.solution != iia->get_solution(c) )
       {
         QElement qe;
         qe.c = c;
