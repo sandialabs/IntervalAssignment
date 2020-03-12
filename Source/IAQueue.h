@@ -179,6 +179,7 @@ class SetValuesCoeffRowsGoalVB: public SetValuesFn
 {
 public:
   SetValuesCoeffRowsGoalVB() {}
+  int rref_r=-1;
 public:
   void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
 };

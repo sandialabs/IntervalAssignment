@@ -448,16 +448,21 @@ void SetValuesCoeffRowsGoalVB::set_values_implementation(const IncrementalInterv
   qe.valueA = - ((double)rows.size());
   
   // number vars of in its rows
+  int reduced_rows = 0;
   std::set<int> vars;
   for (auto r : rows )
   {
     vars.insert( iia.rows[r].cols.begin(), iia.rows[r].cols.end() );
+    if (r < rref_r)
+      reduced_rows++;
   }
-  qe.valueB = - ((double) vars.size());
+  // heavily favor variables that do not appear in reduced rows at all
+  qe.valueB = - ((double) vars.size()) - 80*reduced_rows;
   
   double glo, ghi;
   iia.compute_tied_goals(c,glo,ghi);
   qe.valueC = (glo==0. ? numeric_limits<double>::max()/2 : glo);
+  
 }
 
 

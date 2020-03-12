@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D2403A29240DD96D0074DD8B /* iia-cubit-autotest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D2403A28240DD96D0074DD8B /* iia-cubit-autotest.cpp */; };
 		D243C80C23EB92B700F3C7BF /* IA.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C80623EB92B700F3C7BF /* IA.cpp */; };
 		D243C80D23EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C80823EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp */; };
 		D243C81623EE465200F3C7BF /* CpuTimer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81523EE465200F3C7BF /* CpuTimer.cpp */; };
@@ -28,6 +29,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D2403A28240DD96D0074DD8B /* iia-cubit-autotest.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = "iia-cubit-autotest.cpp"; path = "../../Source/iia-cubit-autotest.cpp"; sourceTree = "<group>"; };
 		D243C7FB23EB929800F3C7BF /* IntervalAssignment-xcode */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "IntervalAssignment-xcode"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D243C80623EB92B700F3C7BF /* IA.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IA.cpp; path = ../../Source/IA.cpp; sourceTree = "<group>"; };
 		D243C80723EB92B700F3C7BF /* IA.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IA.h; path = ../../Source/IA.h; sourceTree = "<group>"; };
@@ -88,6 +90,7 @@
 				D243C80723EB92B700F3C7BF /* IA.h */,
 				D243C80823EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp */,
 				D243C80B23EB92B700F3C7BF /* IncrementalIntervalAssignment.h */,
+				D2403A28240DD96D0074DD8B /* iia-cubit-autotest.cpp */,
 				D243C81A23F5FEB600F3C7BF /* test.cpp */,
 			);
 			path = "IntervalAssignment-xcode";
@@ -154,6 +157,7 @@
 				D243C81623EE465200F3C7BF /* CpuTimer.cpp in Sources */,
 				D243C81923EE47F000F3C7BF /* IAResultImplementation.cpp in Sources */,
 				D243C81B23F5FEB700F3C7BF /* test.cpp in Sources */,
+				D2403A29240DD96D0074DD8B /* iia-cubit-autotest.cpp in Sources */,
 				D2B6599123FCEA29009EBEAE /* IAQueue.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

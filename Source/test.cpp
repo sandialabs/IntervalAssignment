@@ -4,6 +4,8 @@
 #include "IAResultImplementation.h"
 #include <iostream>
 
+void iia_cubit_autotest();
+
 // tests
 // HNF, RREF on a few small matrices
 // opposite sides equal
@@ -84,7 +86,7 @@ void test_solution(IIA::IA &ia, std::vector<int> expected_solution)
 
   }
 }
-
+  
 // solution is symmetric, x 2,4,6,8,10, are equivalent, 3 should be 1, 3 should be 2
 void shuffle_solution(IIA::IA &ia, std::vector<int> &expected_solution, const std::vector<int> &equivalent_indices)
 {
@@ -657,6 +659,73 @@ void test_problem_G()
   std::cout << "test_problem_G  end." << std::endl;
 }
 
+
+
+void test_problem_H()
+{
+  // triprimite, midpoint subdivision of a triangular surface
+   // 0 Face_1_3triangle0 : +1x0(Curve 1) -1x1(Curve 2) -1x2(Curve 3)  <=  -2
+   // 1 Face_1_3triangle1 : -1x0(Curve 1) +1x1(Curve 2) -1x2(Curve 3)  <=  -2
+   // 2 Face_1_3triangle2 : -1x0(Curve 1) -1x1(Curve 2) +1x2(Curve 3)  <=  -2
+   // 3 Face_1_sum_even 3: -1x0(Curve 1) -1x1(Curve 2) -1x2(Curve 3) +2x3(Surface 1_sum_even_var/2)  =  0 // EVEN
+  // x0 Curve 1 bounds=[2,+inf], goal=16.522981,
+  // x1 Curve 2 bounds=[2,+inf], goal=16.522981,
+  // x2 Curve 3 bounds=[2,+inf], goal=16.522981,
+  // x3 Surface 1_sum_even_var/2 bounds=[2,+inf], goal=0.000000,
+  
+  std::cout << "test_problem_H  start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+    
+  ia.resize(4,3);
+  {
+    std::vector<int> cols = {  0,  1,  2};
+    std::vector<int> vals = {  1, -1, -1};
+    ia.set_row(0, cols, vals);
+    ia.set_constraint(0, IIA::LE);
+    ia.set_rhs(0, -2);
+  }
+  {
+    std::vector<int> cols = {  0,  1,  2};
+    std::vector<int> vals = { -1,  1, -1};
+    ia.set_row(1, cols, vals);
+    ia.set_constraint(1, IIA::LE);
+    ia.set_rhs(1, -2);
+  }
+  {
+    std::vector<int> cols = {  0,  1,  2};
+    std::vector<int> vals = { -1, -1,  1};
+    ia.set_row(2, cols, vals);
+    ia.set_constraint(2, IIA::LE);
+    ia.set_rhs(2, -2);
+  }
+  {
+    std::vector<int> cols = { 0,  1,  2};
+    std::vector<int> vals = { 1,  1,  1};
+    ia.set_row(3, cols, vals);
+    ia.set_constraint(3, IIA::EVEN);
+  }
+
+  ia.set_goal(0,17.);
+  ia.set_goal(1,17.);
+  ia.set_goal(2,17.);
+
+  ia.set_bound_lo(0,2);
+  ia.set_bound_lo(1,2);
+  ia.set_bound_lo(2,2);
+    
+  ia.solve();
+  
+  test_result(ia);
+
+  std::vector<int> expected_solution = {18, 17, 17};
+  shuffle_solution(ia,expected_solution, {0,1,2} );
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_G  end." << std::endl;
+}
+
 namespace IIA_Internal
 {
   // tester class is derived so we can test protected members
@@ -979,23 +1048,25 @@ int main(int argc, const char * argv[])
   
   // test Reduce Row Echelon RREF and Hermite Normal Form HNF matrix routines
   using IIA_Internal::IIATester;
-  IIATester::test_problem0();
-  IIATester::test_problem1();
-  IIATester::test_problem2();
-  IIATester::test_problem3();
-  
-  // test solving some interval assignment problem
-  test_problem_A();
-  test_problem_AA();
-  test_problem_AB();
-  test_problem_B();
-  test_problem_BB();
-  test_problem_BC();
-  test_problem_C();
-  test_problem_D();
-  test_problem_E();
-  
-  test_problem_F();
-  test_problem_G();
+//  IIATester::test_problem0();
+//  IIATester::test_problem1();
+//  IIATester::test_problem2();
+//  IIATester::test_problem3();
+//  
+//  // test solving some interval assignment problem
+//  test_problem_A();
+//  test_problem_AA();
+//  test_problem_AB();
+//  test_problem_B();
+//  test_problem_BB();
+//  test_problem_BC();
+//  test_problem_C();
+//  test_problem_D();
+//  test_problem_E();
+//  
+//  test_problem_F();
+//  test_problem_G();
+//  test_problem_H();
 
+  iia_cubit_autotest();
 }

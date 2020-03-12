@@ -3365,6 +3365,7 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
     result->debug_message("rref_step1VB\n");
     
     SetValuesCoeffRowsGoalVB val_CoeffRowsGoal_Q;
+    val_CoeffRowsGoal_Q.rref_r=rref_r;
     QWithReplacement Q(this, val_CoeffRowsGoal_Q, numeric_limits<double>::lowest()/4);
 
     vector<int>all_vars;
@@ -3376,8 +3377,8 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
     }
 
     // workspace
-    set<int> changed_var_set;
-    vector<int>update_var;
+    set<int>   changed_var_set;
+    vector<int> update_var;
 
     for (;;)
     {
@@ -3502,6 +3503,7 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
             if (rref_col_map[c]<0 && !col_rows[c].empty() && col_rows[c].back() >= rref_r)
               update_var.push_back(c);
           }
+          val_CoeffRowsGoal_Q.rref_r=rref_r; // affects priority
           Q.update( update_var, false );
         }
       }
