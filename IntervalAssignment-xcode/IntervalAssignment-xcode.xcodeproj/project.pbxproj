@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D2403A29240DD96D0074DD8B /* iia-cubit-autotest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D2403A28240DD96D0074DD8B /* iia-cubit-autotest.cpp */; };
 		D243C80C23EB92B700F3C7BF /* IA.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C80623EB92B700F3C7BF /* IA.cpp */; };
 		D243C80D23EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C80823EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp */; };
 		D243C81623EE465200F3C7BF /* CpuTimer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81523EE465200F3C7BF /* CpuTimer.cpp */; };
@@ -28,21 +29,22 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		D243C7FB23EB929800F3C7BF /* .. */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; name = ..; path = "IntervalAssignment-xcode"; sourceTree = BUILT_PRODUCTS_DIR; };
-		D243C80623EB92B700F3C7BF /* IA.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IA.cpp; path = /Users/samitch/Documents/repos/IntervalAssignment/Source/IA.cpp; sourceTree = "<absolute>"; };
-		D243C80723EB92B700F3C7BF /* IA.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IA.h; path = ../Source/IA.h; sourceTree = "<group>"; };
-		D243C80823EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IncrementalIntervalAssignment.cpp; path = /Users/samitch/Documents/repos/IntervalAssignment/Source/IncrementalIntervalAssignment.cpp; sourceTree = "<absolute>"; };
-		D243C80B23EB92B700F3C7BF /* IncrementalIntervalAssignment.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IncrementalIntervalAssignment.h; path = ../Source/IncrementalIntervalAssignment.h; sourceTree = "<group>"; };
-		D243C80F23ECB6E900F3C7BF /* IAInline.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAInline.h; path = ../Source/IAInline.h; sourceTree = "<group>"; };
-		D243C81023ECB6FA00F3C7BF /* IAEnums.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAEnums.h; path = ../Source/IAEnums.h; sourceTree = "<group>"; };
-		D243C81123ECEA9F00F3C7BF /* IAResult.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAResult.h; path = ../Source/IAResult.h; sourceTree = "<group>"; };
-		D243C81423EE465200F3C7BF /* CpuTimer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = CpuTimer.h; path = ../Source/CpuTimer.h; sourceTree = "<group>"; };
-		D243C81523EE465200F3C7BF /* CpuTimer.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = CpuTimer.cpp; path = /Users/samitch/Documents/repos/IntervalAssignment/Source/CpuTimer.cpp; sourceTree = "<absolute>"; };
-		D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IAResultImplementation.cpp; path = /Users/samitch/Documents/repos/IntervalAssignment/Source/IAResultImplementation.cpp; sourceTree = "<absolute>"; };
-		D243C81823EE47EF00F3C7BF /* IAResultImplementation.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAResultImplementation.h; path = ../Source/IAResultImplementation.h; sourceTree = "<group>"; };
-		D243C81A23F5FEB600F3C7BF /* test.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = test.cpp; path = ../Source/test.cpp; sourceTree = SOURCE_ROOT; };
-		D2B6598F23FCE916009EBEAE /* IAQueue.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAQueue.h; path = ../Source/IAQueue.h; sourceTree = "<group>"; };
-		D2B6599023FCEA29009EBEAE /* IAQueue.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IAQueue.cpp; path = /Users/samitch/Documents/repos/IntervalAssignment/Source/IAQueue.cpp; sourceTree = "<absolute>"; };
+		D2403A28240DD96D0074DD8B /* iia-cubit-autotest.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = "iia-cubit-autotest.cpp"; path = "../../Source/iia-cubit-autotest.cpp"; sourceTree = "<group>"; };
+		D243C7FB23EB929800F3C7BF /* IntervalAssignment-xcode */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "IntervalAssignment-xcode"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D243C80623EB92B700F3C7BF /* IA.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IA.cpp; path = ../../Source/IA.cpp; sourceTree = "<group>"; };
+		D243C80723EB92B700F3C7BF /* IA.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IA.h; path = ../../Source/IA.h; sourceTree = "<group>"; };
+		D243C80823EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IncrementalIntervalAssignment.cpp; path = ../../Source/IncrementalIntervalAssignment.cpp; sourceTree = "<group>"; };
+		D243C80B23EB92B700F3C7BF /* IncrementalIntervalAssignment.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IncrementalIntervalAssignment.h; path = ../../Source/IncrementalIntervalAssignment.h; sourceTree = "<group>"; };
+		D243C80F23ECB6E900F3C7BF /* IAInline.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAInline.h; path = ../../Source/IAInline.h; sourceTree = "<group>"; };
+		D243C81023ECB6FA00F3C7BF /* IAEnums.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAEnums.h; path = ../../Source/IAEnums.h; sourceTree = "<group>"; };
+		D243C81123ECEA9F00F3C7BF /* IAResult.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAResult.h; path = ../../Source/IAResult.h; sourceTree = "<group>"; };
+		D243C81423EE465200F3C7BF /* CpuTimer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = CpuTimer.h; path = ../../Source/CpuTimer.h; sourceTree = "<group>"; };
+		D243C81523EE465200F3C7BF /* CpuTimer.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = CpuTimer.cpp; path = ../../Source/CpuTimer.cpp; sourceTree = "<group>"; };
+		D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IAResultImplementation.cpp; path = ../../Source/IAResultImplementation.cpp; sourceTree = "<group>"; };
+		D243C81823EE47EF00F3C7BF /* IAResultImplementation.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAResultImplementation.h; path = ../../Source/IAResultImplementation.h; sourceTree = "<group>"; };
+		D243C81A23F5FEB600F3C7BF /* test.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = test.cpp; path = ../../Source/test.cpp; sourceTree = "<group>"; };
+		D2B6598F23FCE916009EBEAE /* IAQueue.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAQueue.h; path = ../../Source/IAQueue.h; sourceTree = "<group>"; };
+		D2B6599023FCEA29009EBEAE /* IAQueue.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IAQueue.cpp; path = ../../Source/IAQueue.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -88,6 +90,7 @@
 				D243C80723EB92B700F3C7BF /* IA.h */,
 				D243C80823EB92B700F3C7BF /* IncrementalIntervalAssignment.cpp */,
 				D243C80B23EB92B700F3C7BF /* IncrementalIntervalAssignment.h */,
+				D2403A28240DD96D0074DD8B /* iia-cubit-autotest.cpp */,
 				D243C81A23F5FEB600F3C7BF /* test.cpp */,
 			);
 			path = "IntervalAssignment-xcode";
@@ -154,6 +157,7 @@
 				D243C81623EE465200F3C7BF /* CpuTimer.cpp in Sources */,
 				D243C81923EE47F000F3C7BF /* IAResultImplementation.cpp in Sources */,
 				D243C81B23F5FEB700F3C7BF /* test.cpp in Sources */,
+				D2403A29240DD96D0074DD8B /* iia-cubit-autotest.cpp in Sources */,
 				D2B6599123FCEA29009EBEAE /* IAQueue.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

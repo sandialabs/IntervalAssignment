@@ -3225,8 +3225,8 @@ namespace IIA_Internal
     }
 
     // workspace
-    set<int> changed_var_set;
-    vector<int>update_var;
+    set<int>   changed_var_set;
+    vector<int> update_var;
 
     for (;;)
     {
@@ -3351,6 +3351,7 @@ namespace IIA_Internal
             if (rref_col_map[c]<0 && !col_rows[c].empty() && col_rows[c].back() >= rref_r)
               update_var.push_back(c);
           }
+          val_CoeffRowsGoal_Q.rref_r=rref_r; // affects priority
           Q.update( update_var, false );
         }
       }
