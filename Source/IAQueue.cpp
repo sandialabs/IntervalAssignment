@@ -282,63 +282,10 @@ namespace  IIA_Internal
   
   void SetValuesNumCoeff::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
-    // valuesA = -number of coefficients
-    // valuesB = -smallest coefficient magnitude
-    // valuesC = larger goal (because if these are in fewer rref rows then they end up in more nullspace vectors)
-    
-    // exceptions for different types of variables: edge; sum-even coeff 2, sum-even coeff 1; slack equality, slack inequality.
-    
-    const int c = qe.c;
-    // valueA
-    qe.valueA = - ((int) iia.col_rows[c].size());
-    // valueB
-    {
-      int smallest_coeff = numeric_limits<int>::max();
-      for (auto r : iia.col_rows[c])
-      {
-        const int c_coeff = abs(iia.rows[r].get_val(c));
-        smallest_coeff = min( smallest_coeff, c_coeff );
-      }
-      qe.valueB = -smallest_coeff;
-    }
-    // valueC
-    auto ctype = iia.col_type[c];
-    if (ctype==IncrementalIntervalAssignment::INT_VAR)
-    {
-      double glo, ghi;
-      iia.compute_tied_goals(c,glo,ghi);
-      qe.valueC=glo; // prefer longer ones
-    }
-    else if (ctype==IncrementalIntervalAssignment::EVEN_VAR)  // sum-even
-    {
-      if (fabs(qe.valueB)!=1)
-      {
-        // sum-even with coefficient 2, don't want to pick it
-        qe.valueA = numeric_limits<double>::lowest()/4; // will never get picked, even if it is in only one row
-      }
-      qe.valueC = numeric_limits<double>::max()/2; // highly desirable: weak bounds, don't care quality, OK if in many nullspace rows
-    }
-    else // constraint slack variable
-    {
-      // distinguish equality slack (bad to pick) from inequality slack (OK to pick)
-      // equality slack
-      if (iia.col_lower_bounds[c]==iia.col_upper_bounds[c])
-      {
-        // undesireable, highly constrained to a single value. want it to be independent so it's isolated in its own nullspace row, not dependent on any other slacks
-        qe.valueA = numeric_limits<double>::lowest()/2; // this way it will never get picked, even if it is in only one row
-      }
-      qe.valueC = -1;
-    }
-  }
-  
-  void SetValuesNumCoeffV2::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
-  {
     // in only one row? pick it
     // number of non-one coefficients in all its rows (set union), fewer is better
     //
     // larger goal
-    
-    
     
     // valuesA = -number of coefficients
     // valuesB = -smallest coefficient magnitude
@@ -415,68 +362,18 @@ namespace  IIA_Internal
     }
   }
 
-
-void SetValuesCoeffRowsGoalVB::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
-{
-  // if smallest coeff != 1, then valuesA = -inf
-  // valuesA = -number of rows it appears in, fewer is better
-  // valuesB = -number of variables in its rows, smaller is better
-  // valuesC = has a goal of 0 (is a slack variable), secondarily prefer variables with a larger goal (to be dependent variables, leaving the ones with small goals to be the independent ones)
-  qe.valueA=0.;
-  qe.valueB=0.;
-  qe.valueC=0.;
-  
-  const int c = qe.c;
-
-  int best_coeff=numeric_limits<int>::max();
-  for (int r : iia.col_rows[c])
-  {
-    const int c_coeff = abs(iia.rows[r].get_val(c));
-    if (c_coeff<best_coeff)
-    {
-      best_coeff=c_coeff;
-    }
-  }
-  if (best_coeff != 1)
-  {
-    qe.valueA = numeric_limits<double>::lowest()/2;
-    return;
-  }
-
-  // number of rows
-  auto &rows = iia.col_rows[c];
-  qe.valueA = - ((double)rows.size());
-  
-  // number vars of in its rows
-  std::set<int> vars;
-  for (auto r : rows )
-  {
-    vars.insert( iia.rows[r].cols.begin(), iia.rows[r].cols.end() );
-  }
-  qe.valueB = - ((double) vars.size());
-  
-  double glo, ghi;
-  iia.compute_tied_goals(c,glo,ghi);
-  qe.valueC = (glo==0. ? numeric_limits<double>::max()/2 : glo);
-}
-
-
   void SetValuesCoeffRowsGoal::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
-    // valuesA = -value of smallest coefficient
-    // valuesB = -number of rows it appears in
+    // if smallest coeff != 1, then valuesA = -inf
+    // valuesA = -number of rows it appears in, fewer is better
+    // valuesB = -number of variables in its rows, smaller is better
     // valuesC = has a goal of 0 (is a slack variable), secondarily prefer variables with a larger goal (to be dependent variables, leaving the ones with small goals to be the independent ones)
     qe.valueA=0.;
     qe.valueB=0.;
     qe.valueC=0.;
     
     const int c = qe.c;
-    if (iia.col_rows[c].empty())
-    {
-      qe.valueA=numeric_limits<double>::lowest();
-      return;
-    }
-    qe.valueB = - (double) iia.col_rows[c].size();
+    
     int best_coeff=numeric_limits<int>::max();
     for (int r : iia.col_rows[c])
     {
@@ -486,12 +383,67 @@ void SetValuesCoeffRowsGoalVB::set_values_implementation(const IncrementalInterv
         best_coeff=c_coeff;
       }
     }
-    qe.valueA=-best_coeff;
+    if (best_coeff != 1)
+    {
+      qe.valueA = numeric_limits<double>::lowest()/2;
+      return;
+    }
+    
+    // number of rows
+    auto &rows = iia.col_rows[c];
+    qe.valueA = - ((double)rows.size());
+    
+    // number vars of in its rows
+    std::set<int> vars;
+    for (auto r : rows )
+    {
+      vars.insert( iia.rows[r].cols.begin(), iia.rows[r].cols.end() );
+    }
+    qe.valueB = - ((double) vars.size());
+    
     double glo, ghi;
     iia.compute_tied_goals(c,glo,ghi);
     qe.valueC = (glo==0. ? numeric_limits<double>::max()/2 : glo);
   }
-  
+
+  void SetValuesTiny::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
+  {
+    //     for rows with no other cols, need at least 1
+    //     among those, want cols with fewest non-zeros in other rows
+    const int c = qe.c;
+    // c already chosen?
+    if (tiny_cs->find(c)!=tiny_cs->end())
+    {
+      qe.valueA = numeric_limits<int>::lowest();
+      qe.valueB = 0.;
+      qe.valueC = 0.;
+      return;
+    }
+    
+    int num_new = 0, num_needed = 0;
+    for (auto r : iia.col_rows[c])
+    {
+      auto &cols = iia.rows[r].cols;
+      workspace.resize(std::max(cols.size(),tiny_cs->size()));
+      // count how many tiny_columns are in this row already
+      auto it = set_intersection(cols.begin(), cols.end(),
+                                 tiny_cs->begin(), tiny_cs->end(),
+                                 workspace.begin() );
+      workspace.resize(it - workspace.begin());
+      auto num_tiny_cols_in_row_already = workspace.size();
+      if (num_tiny_cols_in_row_already==1) // need something in this row, just have one variable
+        ++num_needed; // need some column in this row
+      else if (num_tiny_cols_in_row_already==0)
+        ++num_new;
+      // else 2 or more cols already
+    }
+    qe.valueA = num_needed > 0 ? numeric_limits<int>::max()/4 : 0;
+    qe.valueB = -num_new;
+    // pick sum-even and slack vars first
+    //   otherwise, pick variables in few columns, since that's closer to rref
+    const int num_rows = (int) iia.col_rows[c].size();
+    qe.valueC = -num_rows;
+  }
   
   bool QWithReplacement::tip_top( QElement &t)
   {

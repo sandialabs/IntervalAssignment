@@ -850,7 +850,6 @@ namespace IIA_Internal
     return false;
   }
   
-  
   bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMrow)
   {
     CpuTimer *timer=nullptr;
@@ -2246,15 +2245,20 @@ namespace IIA_Internal
     return true;
   }
   
+  bool IncrementalIntervalAssignment::bounds_unsatisfied(int c)
+  {
+    // for tied variables, checks are on the tied-to variable instead
+    if (c < ((int) tied_variables.size()) && tied_variables[c].size()==1)
+      return false;
+    return (col_solution[c]<col_lower_bounds[c] || col_solution[c]>col_upper_bounds[c]);
+  }
+  
   bool IncrementalIntervalAssignment::bounds_satisfied(vector<int>&cols_fail)
   {
     cols_fail.clear();
     for ( int c=0; c <= used_col; ++c)
     {
-      const auto sz = tied_variables[c].size();
-      if (sz==1) // tied variable, checks are on the tied-to variable instead
-        continue;
-      if (col_solution[c]<col_lower_bounds[c] || col_solution[c]>col_upper_bounds[c])
+      if (bounds_unsatisfied(c))
         cols_fail.push_back(c);
     }
     return cols_fail.empty();
@@ -3153,7 +3157,7 @@ namespace IIA_Internal
     }
     return true;
   }
-  
+
   bool IncrementalIntervalAssignment::rref_step_numrows(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
     result->debug_message("rref_step_numrows\n");
@@ -3201,170 +3205,15 @@ namespace IIA_Internal
     return true;
   }
 
-bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
-{
-  result->debug_message("rref_step_numrowsV2\n");
-  priority_queue<QElement> Q;
-  SetValuesNumCoeffV2 val_NumCoeff;
-  vector<int>all_vars(used_col+1);
-  iota(all_vars.begin(),all_vars.end(),0);
-  const double threshold=numeric_limits<double>::lowest(); // anything is fine
-  build_Q(Q, val_NumCoeff, threshold, all_vars);
   
-  QElement t;
-  while (!Q.empty())
-  {
-    if (tip_top(Q, val_NumCoeff, threshold, t))
-      return true;
-    
-    const int c = t.c;
-    // find an unreduced row with a smallest coefficient
-    int cr = -1;
-    int best_coeff = 0;
-    for ( auto r : col_rows[c] )
-    {
-      if (r>=rref_r)
-      {
-        row_simplify(r);
-        auto coeff = abs(rows[r].get_val(c));
-        if (cr==-1 || coeff<best_coeff)
-        {
-          cr=r;
-          best_coeff=coeff;
-        }
-      }
-    }
-    if (cr==-1) // e.g. -1 means no unreduced row had a non-zero coeff, can't use this variable
-      continue;
-    
-    assert(cr>=rref_r);
-    if (!rref_elim(rref_r, cr, c, rref_col_order, rref_col_map))
-      return false;
-    row_simplify(rref_r-1);
-    
-    if (rref_r>used_row)
-      return true;
-  }
-  return true;
-}
-
   bool IncrementalIntervalAssignment::rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
   {
     if (rref_r>used_row)
       return true;
     
     result->debug_message("rref_step1\n");
-    // Use any var that has a "1" for a coefficient in a row,
     
-    priority_queue<QElement> Q;
     SetValuesCoeffRowsGoal val_CoeffRowsGoal_Q;
-    vector<int>all_vars;
-    all_vars.reserve(used_col+1);
-    // don't use a threshold, because coefficients can get worse then get better again
-    const double threshold=-1.5; //-1 means a coeff with a 1, smaller means a larger coefficient
-    
-    for (int c=0; c<=used_col; ++c)
-    {
-      if (rref_col_map[c]==-1)
-        all_vars.push_back(c);
-    }
-    
-    for (;;)
-    {
-      
-      build_Q(Q, val_CoeffRowsGoal_Q, threshold, all_vars);
-      
-      if (Q.empty())
-        return true;
-      
-      all_vars.clear();
-      
-      result->debug_message("Trying %d candidate columns\n",(int)Q.size());
-      
-      bool progress_since_pushback=false;
-      QElement t;
-      while (!Q.empty() && rref_r<=used_row)
-      {
-        if (tip_top(Q,val_CoeffRowsGoal_Q,threshold,t))
-          break;
-        
-        const int c = t.c;
-        
-        // result->info_message("processing t, col %d, valA %g, valB %g, valC %g\n",t.c,t.valueA,t.valueB,t.valueC);
-        
-        // rr row to move into r
-        // find the one with a lead coeff of 1, if any
-        int rr=-1;
-        bool has_row=false;
-        for (int rrr : col_rows[c])
-        {
-          if (rrr<rref_r)
-            continue;
-          if (abs(rows[rrr].get_val(c))==1)
-          {
-            rr=rrr;
-            break;
-          }
-          else
-            has_row=true;
-        }
-        if (rr==-1)
-        {
-          // if it doesn't appear in a large-indexed row any more, skip it forever
-          if (!has_row)
-          {
-            continue;
-          }
-          // we may just need to row_simplify
-          else
-          {
-            for (int rrr : col_rows[c])
-            {
-              if (rrr<rref_r)
-                continue;
-              row_simplify(rrr);
-              if (abs(rows[rrr].get_val(c))==1)
-              {
-                rr=rrr;
-                break;
-              }
-            }
-          }
-        }
-        if (rr==-1)
-        {
-          // try again later
-          if (all_vars.empty())
-            progress_since_pushback=false;
-          all_vars.push_back(c);
-        }
-        else
-        {
-          if(!rref_elim(rref_r, rr, c, rref_col_order, rref_col_map))
-            return false;
-          
-          if (rref_r>used_row)
-            return true;
-          
-          progress_since_pushback=true;
-        }
-      }
-      // try again with the left-over vars, if any
-      if (all_vars.empty() || !progress_since_pushback)
-        return true;
-    }
-    return true;
-  }
-  
-  
-  bool IncrementalIntervalAssignment::rref_step1VB(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
-  {
-    if (rref_r>used_row)
-      return true;
-    
-    result->debug_message("rref_step1VB\n");
-    
-    SetValuesCoeffRowsGoalVB val_CoeffRowsGoal_Q;
     QWithReplacement Q(this, val_CoeffRowsGoal_Q, numeric_limits<double>::lowest()/4);
 
     vector<int>all_vars;
@@ -3737,8 +3586,7 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
     
     // Step 1
     // Use any var that has a "1" for a coefficient in a row, prefering those with fewer rows
-    // if (!rref_step1(rref_r, rref_col_order, rref_col_map))
-    if (!rref_step1VB(rref_r, rref_col_order, rref_col_map))
+    if (!rref_step1(rref_r, rref_col_order, rref_col_map))
       return false;
     
     // Step 2
@@ -3774,8 +3622,7 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
     
     // Step 0
     // pick ones in fewer rows
-//     if (!rref_step_numrows(rref_r, rref_col_order, rref_col_map))
-    if (!rref_step_numrowsV2(rref_r, rref_col_order, rref_col_map))
+    if (!rref_step_numrows(rref_r, rref_col_order, rref_col_map))
       return false;
     
     // Step (end) Last Resort, safety, left-overs
@@ -4620,53 +4467,57 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
     }
   }
   
-  void IncrementalIntervalAssignment::copy_submatrix(vector <int> *pRows, vector <int> *pCols,
-                                                     int *row_map, int *col_map, IncrementalIntervalAssignment *target ) const
+  void IncrementalIntervalAssignment::copy_submatrix(const vector <int> &sub_rows, const vector <int> &sub_cols,
+                                                     IncrementalIntervalAssignment *target ) const
   {
+    // for each parent column, which sub_matrix column is it?
+    map<int,int> col_map;
+    for ( int c = 0; c < sub_cols.size(); c++ )
+    {
+      col_map[ sub_cols[c] ] = c;
+    }
+
     // for ( r : rows )
     //   target_row = row_map[r]
     //   copy this row r into target row target_row
     //     covert this column c into target column col_map[c]
-    target->used_row=((int)pRows->size())-1;
-    target->used_col=((int)pCols->size())-1;
+    target->used_row=((int)sub_rows.size())-1;
+    target->used_col=((int)sub_cols.size())-1;
     
-    for (auto r : *pRows)
+    // t is row of sub_problem
+    for (int t = 0; t < (int) sub_rows.size(); ++t)
     {
-      const auto t = row_map[r];
-      assert(t>=0);
-      assert(t<=target->used_row);
+      int r = sub_rows[t];
+      // for all (col,val) pairs of the row
       for (size_t i = 0; i < rows[r].cols.size(); ++i)
       {
-        auto c = rows[r].cols[i];
-        auto d = col_map[c];
-        if (d>=0)
+        const auto c = rows[r].cols[i];
+        auto dd = col_map.find(c);
+        if (dd != col_map.end()) // if column is part of the subproblem...
         {
+          int d = dd->second; // col of sub_problem
           target->rows[t].cols.push_back(d);
           target->rows[t].vals.push_back(rows[r].vals[i]);
         }
       }
       assert((size_t)t<target->rhs.size());
       assert((size_t)t<target->constraint.size());
+
       target->rhs[t]=rhs[r];
       target->constraint[t]=constraint[r];
     }
     
-    for (auto c : *pCols)
+    // d is col of sub_problem
+    for (int d = 0; d < (int) sub_cols.size(); ++d)
     {
-      assert(c>=0);
-      const auto d = col_map[c];
-      assert(d>=0);
-      assert(d<=target->used_col);
-      assert(d<(int)target->col_solution.size());
-      target->col_solution[d]=col_solution[c];
+      int c = sub_cols[d];
+
+      target->col_solution    [d]=col_solution    [c];
       target->col_lower_bounds[d]=col_lower_bounds[c];
       target->col_upper_bounds[d]=col_upper_bounds[c];
-      
     }
     
-    // if there is some column without an associated row, we will have missed it, but that should be OK
     target->fill_in_cols_from_rows();
-    
   }
   
   int IncrementalIntervalAssignment::next_available_row( ConstraintType constraint_type)
@@ -5021,7 +4872,7 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
         print_problem("after removing tied variables and adjusting solution\n");
       }
       
-      // debug
+      // to debug just the tied variables
       // return false;
     }
     
@@ -5114,6 +4965,12 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
     int MaxMrow=0; // last row of nullspace M before we augmented it
     
     {
+      // save original matrix A,b
+      MatrixSparseInt *this_matrix = this;
+      EqualsB *this_B = this;
+      MatrixSparseInt Asave(*this_matrix);
+      EqualsB Bsave(*this_B);
+      
       if (do_restore)
       {
         rref_col_order.clear();
@@ -5129,8 +4986,10 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
         
         cols_dep.clear(); cols_ind.clear(); rows_dep.clear();
         categorize_vars(rref_col_order, cols_dep, cols_ind, rows_dep);
+        
       }
       
+      // nullspace
       create_nullspace(cols_dep, cols_ind, rows_dep, M, MaxMrow);
       cull_nullspace_tied_variables(M, MaxMrow);
       
@@ -5141,9 +5000,47 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
         // M.print_matrix_summary("nullspace ");
       }
       // debug
+
+      if (do_restore)
+      {
+        // restore original matrix, before rref
+        swap(*this_matrix,Asave);
+        swap(*this_B,Bsave);
+        // print_problem("solve_sub after restore");
+      }
     }
     
-    const bool in_bounds = satisfy_bounds(M, MaxMrow);
+    bool in_bounds = false;
+    
+    // normal method
+    in_bounds = satisfy_bounds(M, MaxMrow);
+    
+    // satisfy_bounds with tiny subspace
+    //   for all the variables that are out of bounds
+    //   find tiny subspace
+    //   do the above on it instead
+    if (!in_bounds)
+    {
+      bool more_nullspace_rows = false;
+      for ( int c = 0; c <= used_col; ++c )
+      {
+        if (bounds_unsatisfied(c))
+        {
+          if (result->log_debug)
+          {
+            result->debug_message("bounds not satisfied for %d\n",c);
+            print_problem("stuck problem");
+          }
+          
+          if (tiny_subspace(c, M))
+          {
+            more_nullspace_rows = true;
+          }
+        }
+      }
+      if (more_nullspace_rows)
+        in_bounds = satisfy_bounds(M, (int) M.rows.size() );
+    }
     
     // debug
     if (result->log_debug)
@@ -5554,7 +5451,7 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
       if (!sub_problem->solve_sub(do_improve))
       {
         success = false;
-        result->warning_message("Subproblem %d of %d was infeasible.\n", num_subs - i, num_subs );
+        result->warning_message("Subproblem %d of %d was infeasible.\n", i+1, num_subs );
       }
       
       // timing
@@ -5836,6 +5733,84 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
     print_problem("");
   }
   
+  bool IncrementalIntervalAssignment::tiny_subspace(int c, MatrixSparseInt &M)
+  {
+    if (col_rows[c].empty())
+      return false;
+    
+    // choose full columns of this matrix until we have a submatrix with a nontrivial nullspace
+    set <int> tiny_cs, tiny_rs;
+    tiny_cs.insert(c);
+    tiny_rs.insert(col_rows[c].begin(), col_rows[c].end());
+    
+    SetValuesTiny val_tiny_Q;
+    val_tiny_Q.tiny_cs = &tiny_cs;
+    const double threshold=0.;
+    
+    // priority queue with replacement
+    QWithReplacement Q(this,val_tiny_Q,threshold);
+    for (auto r : col_rows[c])
+    {
+      Q.update(rows[r].cols);
+    }
+    
+    do
+    {
+      // pick next column to add
+      QElement t;
+      if (Q.tip_top(t))
+        break;
+      
+      // add it
+      tiny_cs.insert(t.c);
+      auto old_tiny_row_size = tiny_rs.size();
+      tiny_rs.insert(col_rows[t.c].begin(), col_rows[t.c].end());
+
+      // good?
+      if (old_tiny_row_size == tiny_rs.size() && // we didn't add a new row
+          tiny_cs.size()     > tiny_rs.size())   // chance of non-degenerate nullspace
+      {
+        // if there is any row with only one variable, then continue
+        
+        // find nullspace
+        vector<int> tiny_cols(tiny_cs.begin(),tiny_cs.end());
+        vector<int> tiny_rows(tiny_rs.begin(),tiny_rs.end());
+        IncrementalIntervalAssignment *tiny_problem = new_sub_problem(tiny_rows, tiny_cols);
+        vector<int> t_rref_col_order;
+        tiny_problem->rref_improve(t_rref_col_order);
+        vector<int> t_cols_dep, t_cols_ind, t_rows_dep;
+        MatrixSparseInt tM(result);
+        int tMaxMrow;
+
+        // nullspace
+        tiny_problem->categorize_vars(t_rref_col_order, t_cols_dep, t_cols_ind, t_rows_dep);
+        const auto worked = tiny_problem->create_nullspace(t_cols_dep, t_cols_ind, t_rows_dep, tM, tMaxMrow);
+        if ( worked && tMaxMrow > 0)
+        {
+          tiny_problem->cull_nullspace_tied_variables(tM, tMaxMrow);
+
+          // try rows of tM that contain c
+          // convert tM to space of original matrix
+          for (int tr = 0; tr < tMaxMrow; ++tr)
+          {
+            auto &trow = tM.rows[tr];
+            RowSparseInt prow;
+            for (auto tc : trow.cols)
+            {
+              prow.cols.push_back( tiny_problem->parentCols[tc] );
+            }
+            prow.vals = trow.vals;
+            M.push_row(prow);
+          }
+          delete tiny_problem;
+          return true; // it worked, try these
+        }
+      }
+    }
+    while (!Q.empty() && tiny_cs.size() < min(used_col, used_col/2 + 2)); // i.e. while the tiny space is less than have the current matrix size
+    return false; // couldn't find a subspace small enough
+  }
+
   
   void IncrementalIntervalAssignment::recursively_add_edge(int int_var_column,
                                                            int do_sum_even,
@@ -5935,6 +5910,31 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
     }
   }
   
+  IncrementalIntervalAssignment* IncrementalIntervalAssignment::new_sub_problem(const vector <int> &sub_rows, const vector <int> &sub_cols)
+  {
+    auto sub_problem = new IncrementalIntervalAssignment(result);
+    
+    sub_problem->should_adjust_solution_tied_variables = should_adjust_solution_tied_variables;
+    
+    sub_problem->parentProblem = this;
+    sub_problem->parentRows.resize( sub_rows.size() );
+    sub_problem->parentCols.resize( sub_cols.size() );
+    
+    sub_problem->lastCopiedCol =  (int)sub_cols.size();
+    sub_problem->number_of_cols = (int)sub_cols.size();
+    sub_problem->number_of_rows = (int)sub_rows.size();
+    
+    sub_problem->freeze_problem_size();
+    
+    sub_problem->parentCols = sub_cols;
+    sub_problem->parentRows = sub_rows;
+
+    // uses the parentCols
+    copy_bounds_to_sub( sub_problem );
+    copy_submatrix( sub_rows, sub_cols, sub_problem );
+    
+    return sub_problem;
+  }
   
   void IncrementalIntervalAssignment::subdivide_problem(vector<IncrementalIntervalAssignment*> &sub_problems,
                                                         bool do_sum_even, int row_min, int row_max )
@@ -5948,10 +5948,6 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
     
     // map from row (col) of subproblem to row (col) of parent
     vector <int> sub_rows, sub_cols;
-    
-    // map from row (col) of this problem to row (col) of subproblem
-    vector<int> row_map ( number_of_rows, -1 );
-    vector<int> column_map ( number_of_cols, -1 );
     
     // flag if a row or column is in the current subproblem yet.
     vector<int> sub_row_array ( number_of_rows, 0 );
@@ -6009,39 +6005,8 @@ bool IncrementalIntervalAssignment::rref_step_numrowsV2(int &rref_r, vector<int>
         }
         
         // create new sub problem
-        IncrementalIntervalAssignment *sub_problem = new_sub_problem();
+        IncrementalIntervalAssignment *sub_problem = new_sub_problem(sub_rows, sub_cols);
         sub_problems.push_back( sub_problem );
-        
-        sub_problem->parentProblem = this;
-        sub_problem->parentRows.resize( sub_rows.size() );
-        sub_problem->parentCols.resize( sub_cols.size() );
-        
-        sub_problem->lastCopiedCol =  (int)sub_cols.size();
-        sub_problem->number_of_cols = (int)sub_cols.size();
-        sub_problem->number_of_rows = (int)sub_rows.size();
-        
-        sub_problem->freeze_problem_size();
-        
-        // associate columns parent<-->sub problem, make map
-        for ( int c = 0; c < sub_cols.size(); c++ )
-        {
-          auto this_col = sub_cols[c];
-          column_map[ this_col ] = c;
-          sub_problem->parentCols[c] = this_col;
-        }
-        
-        // set row map
-        for ( int r = 0; r < sub_rows.size(); r++ )
-        {
-          auto this_row = sub_rows[r];
-          row_map[ this_row ] = r;
-          sub_problem->parentRows[r] = this_row;
-        }
-        
-        // uses the parentCols
-        copy_bounds_to_sub( sub_problem );
-        
-        copy_submatrix( &sub_rows, &sub_cols, row_map.data(), column_map.data(), sub_problem );
         
         // debug
         if (result->log_debug)

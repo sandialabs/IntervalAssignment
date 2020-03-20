@@ -291,6 +291,11 @@ namespace IIA_Internal
     //   if row_min and row_max are passed in, then we only try to solve the subproblems involving those rows and ignore ones not containing those rows.
     bool solve_phase( bool map_only_phase, bool do_improve, int row_min, int row_max);
     
+    bool tiny_subspace(int c, MatrixSparseInt &M);
+    // find a tiny subset of the matrix that contains the column c, and some some columns of the rows with c,
+    //   and enough rows that the nullspace has dimension >= 1
+    // add those new nullspace rows to M
+    // return false if we couldn't find a reasonable subspace
 
     void recursively_add_edge( int int_var_column,
                               int do_sum_even,
@@ -314,15 +319,15 @@ namespace IIA_Internal
     //- Subdivide the equality (sum-even) constraints of this IncrementalIntervalAssignment into
     //- independent sub-problems, if do_sum_even is false (true).
     
-    IncrementalIntervalAssignment* new_sub_problem();
+    IncrementalIntervalAssignment* new_sub_problem(const vector <int> &sub_rows, const vector <int> &sub_cols);
     void delete_subproblems( vector<IncrementalIntervalAssignment*> &sub_problems );
     
     //- gather the solutions of the sub-problems into this problem
     void gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems );
     
     int solve_sub(bool do_improve);
-    void copy_submatrix(vector <int> *rows, vector <int> *columns,
-                        int *row_map, int *column_map, IncrementalIntervalAssignment *target ) const;
+    void copy_submatrix(const vector <int> &rows, const vector <int> &cols,
+                        IncrementalIntervalAssignment *target ) const;
     void copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem ) const;
     
     // force equality row r to be satisfied by introducing a slack variable r
@@ -359,7 +364,6 @@ namespace IIA_Internal
     // various priorities for choosing next row to call rref_elim
     bool rref_step0(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
-    bool rref_step1VB(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_step2(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_stepZ(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_step_numrows(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
@@ -436,6 +440,7 @@ namespace IIA_Internal
     static
     int row_sum(const vector<int>&cols, const vector<int>&coeff, const vector<int> &sol, int rhs); // implementation
 
+    bool bounds_unsatisfied(int c);
     bool bounds_satisfied(vector<int>&cols_fail);
     
     // set M's rows to the nullspace basis vectors of this
@@ -565,20 +570,12 @@ namespace IIA_Internal
     friend class SetValuesNumCoeff;
     friend class SetValuesNumCoeffV2;
     friend class SetValuesCoeffRowsGoal;
-    friend class SetValuesCoeffRowsGoalVB;
+    friend class SetValuesTiny;
   };
   
   inline
   IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr)
   {
-  }
-
-  inline
-  IncrementalIntervalAssignment* IncrementalIntervalAssignment::new_sub_problem()
-  {
-    auto np = new IncrementalIntervalAssignment(result);
-    np->should_adjust_solution_tied_variables = should_adjust_solution_tied_variables;
-    return np;
   }
   
   inline

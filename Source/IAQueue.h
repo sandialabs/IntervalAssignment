@@ -156,16 +156,7 @@ namespace IIA_Internal
     void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
 
-  // in order of increasing number of coefficients = number of rows the variable appears in
-  class SetValuesNumCoeffV2: public SetValuesFn
-  {
-  public:
-    SetValuesNumCoeffV2() {}
-  public:
-    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
-  };
-
-  // pick column to eliminate in rref, that has a small coeff, is in few rows, and is long
+  // pick column to eliminate in rref, that has a small coeff, is in few rows, rows are short, and is long
   class SetValuesCoeffRowsGoal: public SetValuesFn
   {
   public:
@@ -174,14 +165,17 @@ namespace IIA_Internal
     void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
 
-// pick column to eliminate in rref, that has a small coeff, is in few rows, rows are short, and is long
-class SetValuesCoeffRowsGoalVB: public SetValuesFn
-{
-public:
-  SetValuesCoeffRowsGoalVB() {}
-public:
-  void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
-};
+  // pick column to eliminate in rref, that has a small coeff, is in few rows, rows are short, and is long
+  class SetValuesTiny: public SetValuesFn
+  {
+  public:
+    SetValuesTiny() {}
+    set <int> *tiny_cs = nullptr;
+  public:
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
+  private:
+    vector <int> workspace;
+  };
 
   // true if A<B by lexicographic min max
   bool is_better( vector<QElement> &qA, vector<QElement> &qB);

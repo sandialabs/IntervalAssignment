@@ -4,6 +4,8 @@
 #include "IAResultImplementation.h"
 #include <iostream>
 
+// void iia_cubit_autotest();
+
 // tests
 // HNF, RREF on a few small matrices
 // opposite sides equal
@@ -979,6 +981,7 @@ int main(int argc, const char * argv[])
   
   // test Reduce Row Echelon RREF and Hermite Normal Form HNF matrix routines
   using IIA_Internal::IIATester;
+  
   IIATester::test_problem0();
   IIATester::test_problem1();
   IIATester::test_problem2();
@@ -997,5 +1000,6 @@ int main(int argc, const char * argv[])
   
   test_problem_F();
   test_problem_G();
-
+  
+  // iia_cubit_autotest();
 }
