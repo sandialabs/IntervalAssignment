@@ -4961,7 +4961,7 @@ namespace IIA_Internal
     // setup nullspace for improving bounds and quality
     // M is nullspace
     // rows 0..MaxMrow span the nullspace, and beyond that are extra rows that were useful candidate increment vectors
-    MatrixSparseInt M(result);
+    MatrixSparseInt &M = Nullspace;
     int MaxMrow=0; // last row of nullspace M before we augmented it
     
     {
@@ -5077,6 +5077,8 @@ namespace IIA_Internal
       // debug
       
       fine_tune(M,N);
+      
+      //zzyk to do, experiment whether we should add N to M to pass back to the parent nullspace
       
       // debug
       if (result->log_debug)
@@ -5411,8 +5413,32 @@ namespace IIA_Internal
     return success;
   }
   
+  int RowSparseInt::dot(const RowSparseInt &b)
+  {
+    int d(0), i(0),j(0);
+    while (i<cols.size() && j<b.cols.size())
+    {
+      int r =   cols[i];
+      int s = b.cols[j];
+      // for cols in both rows
+      if (r < s)
+      {
+        ++i;
+      }
+      else if (r > s)
+        ++j;
+      else
+      {
+        d += vals[i] * b.vals[j];
+        ++i;
+        ++j;
+      }
+    }
+    return d;
+  }
+
   
-  bool IncrementalIntervalAssignment::solve_phase(bool map_only_phase, bool do_improve, int row_min, int row_max )
+  bool IncrementalIntervalAssignment::solve_phase(bool map_only_phase, bool do_improve, int row_min, int row_max)
   {
     if (result->log_debug)
     {
@@ -5425,9 +5451,336 @@ namespace IIA_Internal
     
     // subdivide problems into independent components
     vector<IncrementalIntervalAssignment*> sub_problems;
+    vector<MatrixSparseInt*> sub_nullspaces;
     subdivide_problem( sub_problems, !map_only_phase, row_min, row_max  );
     const auto num_subs = sub_problems.size();
 
+    print_problem("parent");
+    
+    // copy and fix nullspaces from parent to sub
+    if (!map_only_phase)
+    {
+      // make parent to sub column map, using sub to parent map
+      const size_t mapsize = used_col+1;
+      vector<IncrementalIntervalAssignment*> col_subproblem(mapsize,nullptr);
+      parentCols.assign(mapsize,-1);
+      for ( auto *sub_problem : sub_problems)
+      {
+        sub_problem->print_problem("sub_problem");
+
+        for (int sc=0; sc < sub_problem->parentCols.size(); ++sc )
+        {
+          int pc = sub_problem->parentCols[sc];
+          if (pc>=0)
+          {
+            parentCols[ pc ] = sc;
+            col_subproblem[ pc ] = sub_problem;
+          }
+        }
+      }
+
+      // gather relevant nullspace from this to sub problems
+      for (auto &prow : Nullspace.rows)
+      {
+        if (prow.cols.empty())
+          continue;
+
+        // determine which subproblem, and verify *all* the columns are in that subproblem
+        IncrementalIntervalAssignment *sub_problem = col_subproblem[ prow.cols[0] ];
+        for (int pc : prow.cols)
+        {
+          if ( col_subproblem[pc] != sub_problem )
+          {
+            sub_problem = nullptr;
+            break;
+          }
+        }
+        if (sub_problem==nullptr)
+          continue;
+        
+        // convert from parent columns to sub_problem columns
+        RowSparseInt srow; // sub nullspace row
+        srow.vals = prow.vals;
+        for (auto pc : prow.cols)
+        {
+          int sc = parentCols[pc];
+          assert(sc>=0);
+          srow.cols.push_back(sc);
+        }
+        
+        // iterate over the sub_problem rows that have a variable in common with the nullspace row
+        set<int> subrows;
+        for (auto c : srow.cols)
+        {
+          subrows.insert( sub_problem->col_rows[c].begin(), sub_problem->col_rows[c].end() );
+        }
+
+        // verify row is in the nullspace of the subproblem. If not, figure out the dummy variables that need to be added to it to make it in the nullspace.
+
+        // a spanning set of nullspace vectors includes one entry for each row that has a non-trivial contribution.
+        // nullspace row = k_row * row + k_dummy * dummy_col
+        struct nullrowinfo
+        {
+          int k_row, k_dummy, dummy_col, c_dummy;
+          nullrowinfo() : k_row(0), k_dummy(0), dummy_col(-1), c_dummy(1) {}
+          nullrowinfo(int k_row_in, int k_dummy_in, int dummy_col_in, int c_dummy_in) : k_row(k_row_in), k_dummy(k_dummy_in), dummy_col(dummy_col_in), c_dummy(c_dummy_in) {}
+        };
+        map < int, vector<nullrowinfo> > nullrows;
+        bool ok(true);
+        
+        for (auto r : subrows) // sub constraint row
+        {
+          auto &row = sub_problem->rows[r];
+          
+          // calculate row-sum, plus gather any extra varibles in the subproblem row but not in the nullspace vector
+          vector<int> extra_cols;
+          int row_sum(0), i(0),j(0);
+          while (i<row.cols.size() && j<srow.cols.size())
+          {
+            int rc =  row.cols[i];
+            int sc = srow.cols[j];
+            // for cols in both rows
+            if (rc < sc)
+            {
+              extra_cols.push_back(rc);
+              ++i;
+            }
+            else if (rc > sc)
+              ++j;
+            else
+            {
+              row_sum += row.vals[i] * srow.vals[j];
+              ++i;
+              ++j;
+            }
+          }
+          while(i<row.cols.size())
+          {
+            extra_cols.push_back(row.cols[i]);
+            ++i;
+          }
+
+          
+          // row_sum==0 means its already in the nullspace of that row. Leave nullrowinfo empty.
+          if (row_sum!=0)
+          {
+            auto &v = nullrows[r]; //creates
+            // for any extra col, if it is in just the one row, then we're good, we can make a nullspace row for the sub
+            for (auto dummy_col : extra_cols)
+            {
+              if (sub_problem->col_rows[dummy_col].size()==1)
+              {
+                // assert(col_rows[extra_cols[0]][0]) should be this row
+                int coeff = row.get_val(dummy_col);
+                int p = abs(lcm(coeff,row_sum));
+                
+                // ensure k_row > 0 for simpicity
+                if (row_sum < 0) p = -p;
+                int k_dummy =   -p / coeff;
+                int k_row   =    p / row_sum;
+                assert(k_row>0);
+                // nullspace row = k_row * row + k_dummy * dummy_col
+                v.emplace_back(nullrowinfo(k_row,k_dummy,dummy_col,coeff));
+              }
+            }
+            if (v.empty())
+            {
+              // failed, we can't make a nullspace row this way
+              ok = false;
+              break;
+            }
+          }
+        }
+        
+        // now build the nullspace vectors and verify
+        if (ok)
+        {
+          // use the "smallest" dummy variable for every row to make a nullspace vector
+          // there is probably a more sophisticated way to pick the one that has a small lcm, but try greedy for now.
+          // also calculate k_row, the overall multiple of the nullspace row to use
+          vector <int> ii;
+          int k_row=1;
+          for (auto &n : nullrows)
+          {
+            int min_i=0, min_kd=1, min_kk=k_row;
+            bool min_sign_agrees=false;
+            VarType min_var_type=UNKNOWN_VAR; // {INT_VAR, EVEN_VAR, DUMMY_VAR, UNKNOWN_VAR};
+            for (int i=0; i<n.second.size();++i)
+            {
+              const int ki = n.second[i].k_row;
+              const int kk = abs(lcm(k_row,ki));
+              const int kd = n.second[i].k_dummy;
+              const VarType ktype = col_type[ki]; // or should we be looking at the subproblem?
+              // zzyk
+              // selection criteria:
+              //   type sum-even var (this is the opposite of prefering small coefficient for multiplying row)
+              //   type dummy var
+              //   k_dummy is positve, dummy variable will increase with additions to the nullspace vector
+              //   small coefficient for multiplying row
+              //   small coefficient for multiplying k, i.e. kk
+
+              // first time through, set min to the first entry
+              bool pick_i  = (i==0);
+              bool decided = (i==0);
+              
+              // prefer sum-even
+              if (!decided)
+              {
+                if (ktype==EVEN_VAR && min_var_type!=EVEN_VAR)
+                {
+                  pick_i=true;
+                  decided=true;
+                }
+                else if (ktype!=EVEN_VAR && min_var_type==EVEN_VAR)
+                {
+                  pick_i=false;
+                  decided=true;
+                }
+              }
+              // prefer dummy
+              if (!decided)
+              {
+                if (ktype==DUMMY_VAR && min_var_type!=DUMMY_VAR)
+                {
+                  pick_i=true;
+                  decided=true;
+                }
+                else if (ktype!=DUMMY_VAR && min_var_type==DUMMY_VAR)
+                {
+                  pick_i=false;
+                  decided=true;
+                }
+              }
+              // prefer coefficient sign
+              if (!decided)
+              {
+                // k_row was always set to be positive
+                // k_dummy, want it positive, too, as most dummy vars have a lower bound but no upper bound
+                bool sign_agrees = (kd>0);
+                if (sign_agrees && !min_sign_agrees)
+                {
+                  pick_i = true;
+                  decided = true;
+                }
+                else if (!sign_agrees && min_sign_agrees)
+                {
+                  pick_i = false;
+                  decided = true;
+                }
+              }
+              // prefer small coefficient for row, small coeff for k
+              if (!decided)
+              {
+                if (kk < min_kk || (kk==min_kk && abs(kd)<abs(min_kd)))
+                {
+                  pick_i = true;
+                }
+                decided = true;
+              }
+              assert(decided);
+              if (pick_i)
+              {
+                min_i =i;
+                min_kk = kk;
+                min_kd = kd;
+                min_var_type = ktype;
+              }
+            }
+            k_row=min_kk;
+            ii.push_back(min_i);
+          }
+            
+          // generate the subproblem nullspace row
+          auto nrow = srow;
+          nrow.multiply(k_row);
+          
+          // gather the dummy vars
+          {
+            int i=0;
+            for (auto &n : nullrows)
+            {
+              auto &nd = n.second[ii[i]];
+              nrow.cols.push_back( nd.dummy_col );
+              const int k = k_row / nd.k_row;
+              nrow.vals.push_back( k * nd.k_dummy );
+              ++i;
+            }
+          }
+          nrow.sort();
+            
+          if (result->log_debug)
+          {
+            result->info_message("Subproblem nullspace ");
+            nrow.print_row(result);
+          }
+          
+          // debug, double-check that the rowsum is now zero
+          if (1)
+          {
+            for (auto r : subrows) // sub constraint row
+            {
+              auto &row = sub_problem->rows[r];
+              auto row_sum = row.dot(nrow);
+              
+              if (result->log_debug)
+              {
+                result->debug_message("row %d row_sum=%d, ",r,row_sum);
+                row.print_row(result);
+              }
+              assert(row_sum==0);
+            }
+          }
+          
+          sub_problem->Nullspace.push_row(nrow);
+          
+          // For each of the rows that had multiple isolated dummy vars, generate a nullspace row for each of those pairs!
+          {
+            int i=0;
+            for (auto &n : nullrows)
+            {
+              if (n.second.size()>1)
+              {
+                // jj is one of the nullspace indices
+                const int jj = ii[i];
+                for (int j=0; j<n.second.size(); ++j)
+                {
+                  if (j==jj) continue;
+                  
+                  // make nullspace using n.second[j] and n.second[jj]
+                  auto cj  = n.second[ j].c_dummy;
+                  auto cjj = n.second[jj].c_dummy;
+                  
+                  auto k = lcm(cj,cjj);
+                  auto nj  =  k / cj;
+                  auto njj = -k / cjj;
+                  
+                  auto dj  = n.second[ j].dummy_col;
+                  auto djj = n.second[jj].dummy_col;
+                  
+                  RowSparseInt nn;
+                  nn.vals = {nj,njj};
+                  nn.cols = {dj,djj};
+                  nn.sort();
+                  
+                  sub_problem->Nullspace.push_row(nn);
+                }
+              }
+              ++i;
+            }
+          }
+        } // ok
+      }
+      // debug subproblem nullspaces
+      if (result->log_debug)
+      {
+        for ( auto *sub_problem : sub_problems)
+        {
+          //sub_problem->print_problem("sub_problem");
+          get_result()->info_message("sup_problem nullspace");
+          sub_problem->Nullspace.print_matrix();
+        }
+      }
+    }
     // timing
     double solve_time=0.;
     CpuTimer solve_timer;
@@ -5446,8 +5799,10 @@ namespace IIA_Internal
       // In the second phase, for variables that have not been assigned anything, assign goals.
       //   This happens for a single paving face, where the variables were not in any mapping subproblem and so are uninitialized
       if (!map_only_phase)
+      {
         sub_problem->assign_vars_goals(false);
-
+      }
+      
       if (!sub_problem->solve_sub(do_improve))
       {
         success = false;
@@ -5466,7 +5821,7 @@ namespace IIA_Internal
 
     // gather sub-problem soutions back into this problem, copy solution to permanent storage
     if ( success )
-      gather_solutions( sub_problems );
+      gather_solutions( sub_problems, map_only_phase );
     delete_subproblems( sub_problems );
     
     return success;
@@ -5789,7 +6144,9 @@ namespace IIA_Internal
         {
           tiny_problem->cull_nullspace_tied_variables(tM, tMaxMrow);
 
-          // try rows of tM that contain c
+          // zzyk todo: we need to check whether any of the rows of tM actually contain c.
+          // If not, we need to keep going. If so, we should only save those rows, not all of them!
+          
           // convert tM to space of original matrix
           for (int tr = 0; tr < tMaxMrow; ++tr)
           {
@@ -5853,7 +6210,7 @@ namespace IIA_Internal
           //   smaller than the minimum number of intervals implied by the sum-even variable lower bound.
           // Probably a better solution is to just place a lower-bound on the intervals for individual edges, e.g. when one curve is the whole loop.
           // Checking small loops slows down the mapping phase solution, but can make a difference in improving quality.
-          if (!do_add)
+          if (!do_add && 0) //zzyk disable small loop checking
           {
             int min_edge_count=0;
             int expected_edge_count=0;
@@ -5928,6 +6285,10 @@ namespace IIA_Internal
     
     sub_problem->parentCols = sub_cols;
     sub_problem->parentRows = sub_rows;
+    
+    sub_problem->Nullspace.rows.clear();
+    sub_problem->Nullspace.col_rows.clear();
+    sub_problem->Nullspace.col_rows.resize(sub_problem->number_of_cols);
 
     // uses the parentCols
     copy_bounds_to_sub( sub_problem );
@@ -6036,9 +6397,15 @@ namespace IIA_Internal
     sub_problems.clear();
   }
   
-  void IncrementalIntervalAssignment::gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems )
+  void IncrementalIntervalAssignment::gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems, bool want_sub_nullspaces )
   {
-    for (auto sub : sub_problems)
+    if (want_sub_nullspaces)
+    {
+      Nullspace.rows.clear();
+      Nullspace.col_rows.clear();
+      Nullspace.col_rows.resize(number_of_cols);
+    }
+    for (auto *sub : sub_problems)
     {
       assert(sub->parentProblem == this);
       if ( !sub->get_is_solved() )
@@ -6051,8 +6418,50 @@ namespace IIA_Internal
         assert( c >= 0 && c < number_of_cols );
         col_solution[ c ] = sub->col_solution[e];
       }
+
+      // copy the nullspace into the parent nullspace
+      if (want_sub_nullspaces)
+      {
+        auto &sub_nullspace = sub->Nullspace;
+        // debug
+        result->info_message("sub nullspace, with tied variables");
+        sub_nullspace.print_matrix();
+        
+        // convert sub_problem nullspace to parent nullspace variables.
+        for (auto &row : sub_nullspace.rows)
+        {
+          RowSparseInt prow;
+          prow.vals = row.vals;
+          for (auto c : row.cols)
+          {
+            prow.cols.push_back(sub->parentCols[c]);
+          }
+          if (sub->has_tied_variables)
+          {
+            const auto old_size = prow.cols.size();
+            for (int i=0; i<row.cols.size();++i)
+            {
+              const int c = row.cols[i];
+              const int v = row.vals[i];
+              for (int j=1; j<sub->tied_variables[c].size();++j)
+              {
+                int cc = sub->tied_variables[c][j];
+                prow.cols.push_back(sub->parentCols[cc]);
+                prow.vals.push_back(v);
+              }
+            }
+            if (old_size<prow.cols.size())
+              prow.sort();
+          }
+          // no need to sort if we didn't append any tied variables
+          Nullspace.push_row(prow);
+        }
+        
+        // debug
+        result->info_message("parent nullspace");
+        Nullspace.print_matrix();
+      }
     }
-    delete_subproblems( sub_problems );
   }
   
   

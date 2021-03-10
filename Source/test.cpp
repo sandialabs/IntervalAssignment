@@ -63,7 +63,13 @@ void test_result(IIA::IA &ia)
 void test_solution(IIA::IA &ia, std::vector<int> expected_solution)
 {
   bool discrepancy = false;
-  for (int i=0; i < expected_solution.size(); ++i)
+  // The solution might be longer than expected because of it automatically adding dummy variables for sum-even and inequality constraints.
+  if (expected_solution.size() > ia.used_cols())
+  {
+    std::cout << "solution length: actual = " << ia.used_cols() << ", NOT " << expected_solution.size() << " as expected." << std::endl;
+  }
+    
+  for (int i=0; i < expected_solution.size() && i < ia.used_cols(); ++i)
   {
     const auto actual = ia.get_solution(i);
     const auto expected = expected_solution[i];
@@ -726,6 +732,170 @@ void test_problem_H()
   std::cout << "test_problem_G  end." << std::endl;
 }
 
+void test_problem_even_A()
+{
+    // two paved surfaces, connected by a single mapped surface
+    //   1      -1
+    //   1 1 1 1        -2
+    //           1 1 1 1  -2
+    std::cout << "test_problem_even_A  start: ";
+    
+    IIA::IA ia;
+    setup_io(ia.get_result());
+    ia.get_result()->log_info = true;
+    ia.get_result()->log_debug = true;
+
+    
+    ia.resize(3,10);
+    // map
+    {
+    std::vector<int> cols = {0,  4};
+    std::vector<int> vals = {1, -1};
+    ia.set_row(0,cols,vals);
+    }
+    // pave
+    {
+    std::vector<int> cols = {0,  1,  2,  3,  8};
+    std::vector<int> vals = {1,  1,  1,  1, -2};
+    ia.set_row(1,cols,vals);
+    //ia.set_bound_lo( 8, 2 );
+    ia.set_bound_lo( 8, 8 ); // try 8, see if the nullspace row is used
+    }
+    {
+    std::vector<int> cols = {4,  5,  6,  7,  9};
+    std::vector<int> vals = {1,  1,  1,  1, -2};
+    ia.set_row(2,cols,vals);
+    ia.set_bound_lo( 9, 2 );
+    }
+    ia.set_goal (0,  0.8);
+    ia.set_goal (1,  1.2);
+    ia.set_goal (2,  2.1);
+    ia.set_goal (3,  3.2);
+    ia.set_goal (4,  3.2);
+    ia.set_goal (5,  5.2);
+    ia.set_goal (6,  6.2);
+    ia.set_goal (7,  7.2);
+    ia.set_no_goal(8);
+    ia.set_no_goal(9);
+    
+    ia.solve();
+    
+    test_result(ia);
+    std::vector<int> expected_solution = {2, 1, 2, 3, 2, 5, 6, 7, 4, 10};
+    test_solution(ia,expected_solution);
+    
+    std::cout << "test_problem_even_A  end." << std::endl;
+}
+
+void test_problem_even_B()
+{
+  // two paved surfaces, connected
+  //   1 1 1    -2
+  //       1 1 1  -2
+  std::cout << "test_problem_even_B  start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  ia.get_result()->log_info = true;
+  ia.get_result()->log_debug = true;
+  
+  ia.resize(2,7);
+  // pave
+  {
+    std::vector<int> cols = {0,  1,  2,   5};
+    std::vector<int> vals = {1,  1,  1,  -2};
+    ia.set_row(0,cols,vals);
+    ia.set_bound_lo( 5, 2 );
+  }
+  {
+    std::vector<int> cols = {2,  3,  4,   6};
+    std::vector<int> vals = {1,  1,  1,  -2};
+    ia.set_row(1,cols,vals);
+    ia.set_bound_lo( 6, 2 );
+  }
+  ia.set_goal (0,  0.8);
+  ia.set_goal (1,  1.2);
+  ia.set_goal (2,  2.1);
+  ia.set_goal (3,  3.2);
+  ia.set_goal (4,  3.2);
+  ia.set_no_goal(5);
+  ia.set_no_goal(6);
+  
+  ia.solve();
+  
+  test_result(ia);
+  std::vector<int> expected_solution = {1, 1, 2, 3, 3, 2, 4};
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_even_B  end." << std::endl;
+}
+
+
+void test_problem_even_C()
+{
+  // three paved surfaces, one pair connected by a single mapped surface, another pair directly connected
+  //   1      -1
+  //   1 1 1 1            -2
+  //           1 1 1 1       -2
+  //       1           1        -2
+  //   0 1 2 3 4 5 6 7 8   9 10 11
+  std::cout << "test_problem_even_C  start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  ia.get_result()->log_info = true;
+  ia.get_result()->log_debug = true;
+  
+  ia.resize(4,12);
+  // map
+  {
+    std::vector<int> cols = {0,  4};
+    std::vector<int> vals = {1, -1};
+    ia.set_row(0,cols,vals);
+  }
+  // pave
+  {
+    std::vector<int> cols = {0,  1,  2,  3,  9};
+    std::vector<int> vals = {1,  1,  1,  1, -2};
+    ia.set_row(1,cols,vals);
+    ia.set_bound_lo( 9, 5 );
+  }
+  {
+    std::vector<int> cols = {4,  5,  6,  7, 10};
+    std::vector<int> vals = {1,  1,  1,  1, -2};
+    ia.set_row(2,cols,vals);
+    ia.set_bound_lo( 10, 3 );
+  }
+  {
+    std::vector<int> cols = {2,  8,  11};
+    std::vector<int> vals = {1,  1,  -2};
+    ia.set_row(2,cols,vals);
+    ia.set_bound_lo( 11, 2 );
+  }
+  ia.set_goal (0,  0.8);
+  ia.set_goal (1,  1.2);
+  ia.set_goal (2,  2.1);
+  ia.set_goal (3,  3.2);
+  ia.set_goal (4,  3.2);
+  ia.set_goal (5,  5.2);
+  ia.set_goal (6,  6.2);
+  ia.set_goal (7,  7.2);
+  ia.set_goal (8,  2.2);
+  ia.set_no_goal(9);
+  ia.set_no_goal(10);
+  ia.set_no_goal(11);
+
+  ia.solve();
+  
+  test_result(ia);
+  std::vector<int> expected_solution = {2, 1, 2, 5, 2, 5, 6, 7, 2, 5, 3, 2};
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_even_C  end." << std::endl;
+}
+
+
+
 namespace IIA_Internal
 {
   // tester class is derived so we can test protected members
@@ -1045,7 +1215,11 @@ namespace IIA_Internal
 
 int main(int argc, const char * argv[])
 {
-  
+  test_problem_even_A();
+  test_problem_even_B();
+  test_problem_even_C();
+  return 0;
+    
   // test Reduce Row Echelon RREF and Hermite Normal Form HNF matrix routines
   using IIA_Internal::IIATester;
   

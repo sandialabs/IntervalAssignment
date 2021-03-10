@@ -47,6 +47,9 @@ namespace IIA_Internal
     RowSparseInt(vector<int> &&c, vector<int> &&v) : cols(c), vals(v) {}
     RowSparseInt(const RowSparseInt &copy) : cols(copy.cols), vals(copy.vals) {}
     
+    void multiply(int k);     // row = k*row
+    int dot(const RowSparseInt &b); // return this * b as a dot product
+
     void print_row(IAResultImplementation *result) const;
     int get_val(int c) const; // return the value of the row in column c
     int get_col_index(int c) const; // return the index of c in cols
@@ -278,10 +281,13 @@ namespace IIA_Internal
     // my row x is parentProblem's row parentRows[x]
     
     vector<int> parentCols;
+    // my col y is parentProblem's column parentCols[y]
     
     int lastCopiedCol=0;
     //- If this is a subproblem, then lastCopiedCol = the number of
     //- copied columns from big ilp. Otherwise 0.
+    
+    MatrixSparseInt Nullspace;
     
   protected: // methods
 
@@ -323,7 +329,7 @@ namespace IIA_Internal
     void delete_subproblems( vector<IncrementalIntervalAssignment*> &sub_problems );
     
     //- gather the solutions of the sub-problems into this problem
-    void gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems );
+    void gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems, bool want_sub_nullspaces );
     
     int solve_sub(bool do_improve);
     void copy_submatrix(const vector <int> &rows, const vector <int> &cols,
@@ -574,7 +580,7 @@ namespace IIA_Internal
   };
   
   inline
-  IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr)
+  IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr), Nullspace(result_ptr)
   {
   }
   
@@ -715,6 +721,13 @@ namespace IIA_Internal
         solved_used_col = -1;
       }
     }
+  }
+
+  inline
+  void RowSparseInt::multiply(int k)
+  {
+    for (auto &v : vals)
+      v*=k;
   }
 
   
