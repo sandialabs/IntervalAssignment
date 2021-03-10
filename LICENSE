@@ -1,10 +1,11 @@
-Title: IntervalAssignment v. 1.0
-Type: Open Source Software.
+SCR#:2481.0
+Title: IIA Incremental Interval Assignment
+			 (IntervalAssignment v. 1.0)
+Type: Open Source Software
 
 -- Copyright:
 
-Copyright 2020 Sandia Corporation. Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains certain rights in this software.
-SCR#xxxxxx tbd
+Copyright 2020 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software.
 
 The software is deemed to be Publicly Available.
 
