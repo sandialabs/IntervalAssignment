@@ -28,16 +28,6 @@ set( SOURCES
 set( STATIC_DEPENDENCIES
 )
 
-if( NOT SKIP_FIND_FOUNDATION_LIBRARY)
-   find_library( FOUNDATION_LIBRARY Foundation)
-   message( STATUS "FOUNDATION_LIBRARY is ${FOUNDATION_LIBRARY}")
-endif()
-
-set( DEPENDENCIES
-${FOUNDATION_LIBRARY}
-)
-
-
 ##
 ## test-IntervalAssignment
 ##
