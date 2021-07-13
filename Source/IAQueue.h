@@ -2,6 +2,7 @@
 #ifndef IA_QUEUE_H
 #define IA_QUEUE_H
 
+#include <assert.h>
 #include <vector>
 #include <map>
 #include <set>
