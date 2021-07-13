@@ -1,5 +1,7 @@
 // IAResultImplementation.cpp
 #include "IAResultImplementation.h"
+#include <cstdarg>
+// #include <stdarg.h>
 
 namespace IIA_Internal
 {
