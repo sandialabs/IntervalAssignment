@@ -746,7 +746,7 @@ void test_problem_H()
   shuffle_solution(ia,expected_solution, {0,1,2} );
   test_solution(ia,expected_solution);
   
-  std::cout << "test_problem_G  end." << std::endl;
+  std::cout << "test_problem_H  end." << std::endl;
 }
 
 namespace IIA_Internal
