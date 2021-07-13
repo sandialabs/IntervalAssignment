@@ -6,6 +6,7 @@
 #include <numeric>
 #include <cmath>
 #include <cassert>
+#include <algorithm>
 
 #include "IAResultImplementation.h"
 

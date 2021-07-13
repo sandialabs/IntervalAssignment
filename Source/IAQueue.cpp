@@ -3,6 +3,7 @@
 
 #include <numeric>
 #include <cmath>
+#include <algorithm>
 
 #include "IncrementalIntervalAssignment.h"
 #include "IAResultImplementation.h"
