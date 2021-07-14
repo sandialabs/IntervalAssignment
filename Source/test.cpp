@@ -28,7 +28,7 @@ void test_io()
   std::cout << "0: test info_message\n";
   std::cout << "WARNING: 1: test warning_message\n";
   std::cout << "ERROR: 2: test warning_message\n";
-  std::cout << "DEBUG: 3: test warning_message\n\"\n";
+  std::cout << "DEBUG: 3: test debug_message\n\"\n";
   
   IIA_Internal::IAResultImplementation resultImp;
   resultImp.message_log = &std::cout;
@@ -40,7 +40,7 @@ void test_io()
   resultImp.info_message   ("%d: test info_message\n",    0);
   resultImp.warning_message("%d: test warning_message\n", 1);
   resultImp.error_message  ("%d: test warning_message\n", 2);
-  resultImp.debug_message  ("%d: test warning_message\n", 3);
+  resultImp.debug_message  ("%d: test debug_message\n", 3);
 
   std::cout << "test_io end.\n";
 }
