@@ -115,7 +115,7 @@ namespace IIA_Internal
     // public so IncrementalIntervalAssignment methods can access and manipulate them directly for nullspace matrices, etc.
     vector<RowSparseInt> rows;
     vector< vector<int> > col_rows;
-    
+
   protected:
     
     void print_map(const BlockingCols &amap) const;
@@ -290,13 +290,16 @@ namespace IIA_Internal
     MatrixSparseInt Nullspace;
     
   protected: // methods
-
+    
     // the design is all interval matching implementations will have two passes
     //   map means solve everything except the sum-even constraints (possibly return a non-integer solution)
     //   even means solve all constraints, return an integer solution
     //   if row_min and row_max are passed in, then we only try to solve the subproblems involving those rows and ignore ones not containing those rows.
     bool solve_phase( bool map_only_phase, bool do_improve, int row_min, int row_max);
-    
+
+    // convert parent's mapping-phase nullspace vectors to sub_problem's sumeven-phase nullspace vectors, possibly containing dummy variables
+    void transfer_parent_nullspace_to_subs(vector<IncrementalIntervalAssignment*> &sub_problems);
+
     bool tiny_subspace(int c, MatrixSparseInt &M);
     // find a tiny subset of the matrix that contains the column c, and some some columns of the rows with c,
     //   and enough rows that the nullspace has dimension >= 1
@@ -321,6 +324,7 @@ namespace IIA_Internal
     
     //   if row_min and row_max are >-1, then we generate subproblems involving those rows and ignore ones not containing those rows.
     void subdivide_problem(vector<IncrementalIntervalAssignment*> &sub_problems,
+                           vector<int> &orphan_cols,
                            bool do_sum_even, int row_min, int row_max );
     //- Subdivide the equality (sum-even) constraints of this IncrementalIntervalAssignment into
     //- independent sub-problems, if do_sum_even is false (true).
@@ -329,9 +333,9 @@ namespace IIA_Internal
     void delete_subproblems( vector<IncrementalIntervalAssignment*> &sub_problems );
     
     //- gather the solutions of the sub-problems into this problem
-    void gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems, bool want_sub_nullspaces );
+    void gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems, bool want_sub_nullspaces, vector<int> &orphan_cols );
     
-    int solve_sub(bool do_improve);
+    int solve_sub(bool do_improve, bool map_only_phase);
     void copy_submatrix(const vector <int> &rows, const vector <int> &cols,
                         IncrementalIntervalAssignment *target ) const;
     void copy_bounds_to_sub( IncrementalIntervalAssignment *sub_problem ) const;
@@ -418,8 +422,21 @@ namespace IIA_Internal
     
     // find initial feasible solution, satisfying constraints + variable bounds
     //   on input, solution already satisfies constraints, here we use nullspace M to increment intervals to satisfy bounds
+    //   in the second version, we search for rows from N as well, but don't do Gaussian Elimination on them if blocked
     bool satisfy_bounds(MatrixSparseInt&M, int MaxMrow);
+    bool satisfy_bounds(MatrixSparseInt&M, int MaxMrow, MatrixSparseInt&N, int MaxNrow);
+
+    // used by satisfy_bounds
+    bool unbounded_bounds_improvement(int tc, int dx, map<int,int> &improved_cols,
+                                      QWithReplacement &Q, SetValuesFn &val_bounds_Q, const double threshold,
+                                      const MatrixSparseInt &M, int MaxMrow,
+                                      BlockingCols &blocking_cols, vector<int> &deferred_rows);
+    bool any_bounds_improvement(int tc, int dx, map<int,int> &improved_cols,
+                                QWithReplacement &Q, SetValuesFn &val_bounds_Q, const double threshold,
+                                const MatrixSparseInt &M, int MaxMrow, BlockingCols &blocking_cols, vector<int> &deferred_rows,
+                                int &smallest_self_block_coeff, bool &give_up);
     
+
     // partition columns into dependent(leading) and independent(trailing) variables
     // returns true if some of the columns were swapped
     void categorize_vars(vector<int>&col_order,
@@ -498,12 +515,17 @@ namespace IIA_Internal
     bool has_tied_variables = false;
     vector< vector<int> > tied_variables;
     bool find_tied_variables();
-    void remove_tied_variables();
+    // replace variables with the ones they are tied to (i.e. constrained equal to)
+    //  for each row, add up any identical-variable coefficients, fix rows and col_rows
+    void replace_tied_variables();
+    // replace tied variables with zero, e.g. for the nullspace
+    void cull_tied_variables(MatrixSparseInt &M);
     // for tied variables, set the new col_solution to be the geometric average of the min and max tied variable
     bool should_adjust_solution_tied_variables = false;
     void adjust_solution_tied_variables();
-    // if tied variables, then the nullspace will have spurious elementary rows for each removed variable
-    void cull_nullspace_tied_variables(MatrixSparseInt&M, int &MaxMrow);
+    // remove all spurious elementary rows consisting of a single tied variable
+    //   if tied variables, then the nullspace will have spurious elementary rows, one for each tied variable
+    void cull_nullspace_tied_variable_rows(MatrixSparseInt&M, int &MaxMrow);
     // generate datum, returns false if the bounds are non-overlapping so infeasible
     bool generate_tied_data();
     // assign tied-variable to the same value as what they are tied-to.
@@ -539,7 +561,7 @@ namespace IIA_Internal
                                    SetValuesFn *constraint_fn, // satisfying_bounds if this is null, "improving" otherwise
                                    double constraint_threshold,
                                    int tc,
-                                   RowSparseInt &R,
+                                   const RowSparseInt &R,
                                    int dx,
                                    bool &self_block,
                                    int &self_block_coeff,

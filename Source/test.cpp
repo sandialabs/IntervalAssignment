@@ -2,9 +2,11 @@
 #include "IA.h"
 #include "IncrementalIntervalAssignment.h"
 #include "IAResultImplementation.h"
+#include "CpuTimer.h"
 #include <iostream>
 
-// void iia_cubit_autotest();
+  void iia_cubit_autotest();
+// void iia_cubit_test_problem_scale_cren_AA();
 
 // tests
 // HNF, RREF on a few small matrices
@@ -22,13 +24,126 @@
 // some infeasible prolems, like the slanted L
 // u sub-map, dynamic constraints
 
+
+// SetValuesRatio::set_values_goal
+double f(int x_int, double g, int &dx)
+{
+  if (g==0)
+    return 0;
+  
+  double ff=0.;
+  const double x = (double) x_int;
+  if (x<g)
+  {
+    ff = (x>1e-2 ? g/x : 1000.*g*(abs((int)x)+1.));
+    dx = 1;
+  }
+  else
+  {
+    ff = x/g;
+    dx = -1;
+  }
+  return ff;
+}
+
+void test_solution_autogen(IIA::IA &ia, std::vector<int> expected_solution, int dx)
+{
+  // set dx = 0 for testing pave sum-even research code
+  dx=0;
+  
+  bool discrepancy = false;
+  bool first_problem = true;
+  int max_col = ia.used_cols();
+  if (max_col > (int) expected_solution.size())
+    max_col = (int) expected_solution.size();
+  if (max_col > (int) ia.get_solution().size())
+    max_col = (int) ia.get_solution().size();
+  
+  std::multiset<double, std::greater<double> > lex_f_actual, lex_f_expected;
+  
+  for (int c=0; c < max_col; ++c)
+  {
+    const auto actual = ia.get_solution(c);
+    const auto expected = expected_solution[c];
+    if (actual == expected)
+      continue;
+    
+    int lob = std::max(expected-dx,ia.get_bound_lo(c));
+    int hib = std::min(expected+dx,ia.get_bound_hi(c));
+    
+    if (actual<=hib && actual>=lob)
+      continue;
+    
+    // off by more than allowed
+    if (first_problem)
+    {
+      std::cout << "\n";
+      first_problem = false;
+    }
+    const double g = ia.get_goal(c);
+    std::cout << "solution x[" << c << "] = " << actual << ", NOT " << expected << " as expected.";
+    std::cout << " Goal was " << g << " in [";
+    const int lo = ia.get_bound_lo(c);
+    const int hi = ia.get_bound_hi(c);
+    if (lo == std::numeric_limits<int>::lowest())
+      std::cout << "-inf, ";
+    else
+      std::cout << lo << ", ";
+    if (hi == std::numeric_limits<int>::max())
+      std::cout << "inf].";
+    else
+      std::cout << hi << "].";
+    if (g>0.)
+    {
+      int dx_expected, dx_actual;
+      const double f_actual   = f(actual,   g, dx_actual);
+      const double f_expected = f(expected, g, dx_expected);
+      std::cout << " f actual = " << f_actual << ", expected = " << f_expected;
+      lex_f_actual  .insert( f_actual   );
+      lex_f_expected.insert( f_expected );
+    }
+    std::cout << std::endl;
+    // to do, write objective
+    discrepancy=true;
+  }
+  // build lex vector of objective function value for actual and expected, display them
+  if (discrepancy)
+  {
+    std::cout << "solution we found =";
+    for (auto s : ia.get_solution())
+      std::cout << " " << s;
+    std::cout << std::endl;
+    std::cout << "solution expected =";
+    for (auto s : expected_solution)
+      std::cout << " " << s;
+    std::cout << std::endl;
+    
+    // print objective function difference, in sorted order
+    std::cout << "\nFor the solution values that were different:\n";
+    std::cout << "lex f actual: ";
+    for (auto ff : lex_f_actual)
+      std::cout << ff << ", ";
+    std::cout << std::endl;
+    std::cout << "lex f expected: ";
+    for (auto ff : lex_f_expected)
+      std::cout << ff << ", ";
+    std::cout << std::endl;
+  }
+}
+void test_solution_autogen(IIA::IA &ia, std::vector<int> expected_solution)
+{
+  return test_solution_autogen(ia, expected_solution, 1);
+}
+
+
 void setup_io(const IIA::IAResult *result)
 {
   result->message_log = &std::cout;
-  result->log_info = false;
+  result->log_info = true; // false;
   result->log_warning = true;
   result->log_error = true;
   result->log_debug = false;
+  result->log_debug_time = false; // true; // true; // false;
 }
 
 void test_result(IIA::IA &ia)
@@ -742,8 +857,8 @@ void test_problem_even_A()
     
     IIA::IA ia;
     setup_io(ia.get_result());
-    ia.get_result()->log_info = true;
-    ia.get_result()->log_debug = true;
+//    ia.get_result()->log_info = true;
+//    ia.get_result()->log_debug = true;
 
     
     ia.resize(3,10);
@@ -758,8 +873,8 @@ void test_problem_even_A()
     std::vector<int> cols = {0,  1,  2,  3,  8};
     std::vector<int> vals = {1,  1,  1,  1, -2};
     ia.set_row(1,cols,vals);
-    //ia.set_bound_lo( 8, 2 );
-    ia.set_bound_lo( 8, 8 ); // try 8, see if the nullspace row is used
+    // ia.set_bound_lo( 8, 2 );
+    ia.set_bound_lo( 8, 8 ); // try 8, see if the nullspace row is used // zzyk
     }
     {
     std::vector<int> cols = {4,  5,  6,  7,  9};
@@ -787,6 +902,74 @@ void test_problem_even_A()
     std::cout << "test_problem_even_A  end." << std::endl;
 }
 
+void test_problem_even_AA()
+{
+  // check that child nullspace indices are set correctly
+  
+  // two paved surfaces, connected by a single mapped surface, and an intermediate paved surface to mess up the id space
+  //id 0       4       7        11  12 13
+  //   1              -1
+  //   1 1 1 1                  -2
+  //           1 1 1               -2
+  //                   1 1 1 1        -2
+  std::cout << "test_problem_even_AA  start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+//  ia.get_result()->log_info = true;
+//  ia.get_result()->log_debug = true;
+  
+  
+  ia.resize(4,14);
+  // map
+  {
+    std::vector<int> cols = {0,  7};
+    std::vector<int> vals = {1, -1};
+    ia.set_row(0,cols,vals);
+  }
+  // pave
+  {
+    std::vector<int> cols = {0,  1,  2,  3,  11};
+    std::vector<int> vals = {1,  1,  1,  1, -2};
+    ia.set_row(1,cols,vals);
+    ia.set_bound_lo( 11, 2 );
+  }
+  {
+    std::vector<int> cols = {4,  5,  6, 12};
+    std::vector<int> vals = {1,  1,  1, -2};
+    ia.set_row(2,cols,vals);
+    ia.set_bound_lo( 12, 2 );
+  }
+  {
+    std::vector<int> cols = {7,  8,  9,  10, 13};
+    std::vector<int> vals = {1,  1,  1,   1, -2};
+    ia.set_row(3,cols,vals);
+    ia.set_bound_lo( 13, 2 );
+  }
+  ia.set_goal (0,  0.8);
+  ia.set_goal (1,  1.2);
+  ia.set_goal (2,  2.1);
+  ia.set_goal (3,  3.2);
+  ia.set_goal (4, 1.0);
+  ia.set_goal (5, 1.0);
+  ia.set_goal (6, 1.1);
+  ia.set_goal ( 7,  3.2);
+  ia.set_goal ( 8,  5.2);
+  ia.set_goal ( 9,  6.2);
+  ia.set_goal (10,  7.2);
+  ia.set_no_goal(11);
+  ia.set_no_goal(12);
+  ia.set_no_goal(13);
+
+  ia.solve();
+  
+  test_result(ia);
+  std::vector<int> expected_solution = {2, 1, 2, 3,   1, 1, 2,   2, 5, 6, 7,   4, 2, 10};
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_even_AA  end." << std::endl;
+}
+
 void test_problem_even_B()
 {
   // two paved surfaces, connected
@@ -796,8 +979,8 @@ void test_problem_even_B()
   
   IIA::IA ia;
   setup_io(ia.get_result());
-  ia.get_result()->log_info = true;
-  ia.get_result()->log_debug = true;
+//  ia.get_result()->log_info = true;
+//  ia.get_result()->log_debug = true;
   
   ia.resize(2,7);
   // pave
@@ -843,8 +1026,8 @@ void test_problem_even_C()
   
   IIA::IA ia;
   setup_io(ia.get_result());
-  ia.get_result()->log_info = true;
-  ia.get_result()->log_debug = true;
+//  ia.get_result()->log_info = true;
+//  ia.get_result()->log_debug = true;
   
   ia.resize(4,12);
   // map
@@ -869,7 +1052,7 @@ void test_problem_even_C()
   {
     std::vector<int> cols = {2,  8,  11};
     std::vector<int> vals = {1,  1,  -2};
-    ia.set_row(2,cols,vals);
+    ia.set_row(3,cols,vals);
     ia.set_bound_lo( 11, 2 );
   }
   ia.set_goal (0,  0.8);
@@ -888,7 +1071,7 @@ void test_problem_even_C()
   ia.solve();
   
   test_result(ia);
-  std::vector<int> expected_solution = {2, 1, 2, 5, 2, 5, 6, 7, 2, 5, 3, 2};
+  std::vector<int> expected_solution = {2, 1, 2, 5, 2, 5, 6, 7, 2, 5, 10, 2};
   test_solution(ia,expected_solution);
   
   std::cout << "test_problem_even_C  end." << std::endl;
@@ -1215,11 +1398,23 @@ namespace IIA_Internal
 
 int main(int argc, const char * argv[])
 {
-  test_problem_even_A();
-  test_problem_even_B();
-  test_problem_even_C();
+  CpuTimer total_timer;
+  
+  // test sum-even research code
+//   test_problem_even_A();
+//   test_problem_even_AA();
+//   test_problem_even_B();
+//   test_problem_even_C();
+  
+//  iia_cubit_test_problem_scale_cren_AA();
+//  double time_used = total_timer.cpu_secs();
+//  std::cout << "main time used " << time_used << std::endl;
+//
+  // return 0;
+  
+  iia_cubit_autotest();
   return 0;
-    
+  
   // test Reduce Row Echelon RREF and Hermite Normal Form HNF matrix routines
   using IIA_Internal::IIATester;
   
@@ -1243,5 +1438,7 @@ int main(int argc, const char * argv[])
   test_problem_G();
   test_problem_H();
   
-  // iia_cubit_autotest();
+  
+  // double time_used = total_timer.cpu_secs();
+  // std::cout << "main time used " << time_used << std::endl;
 }
