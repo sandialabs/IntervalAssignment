@@ -54,6 +54,8 @@ namespace IIA_Internal
     int get_val(int c) const; // return the value of the row in column c
     int get_col_index(int c) const; // return the index of c in cols
     void sort(); // sort by increasing column index. Also updates the vals.
+    
+    void sparse_to_full(vector<int> &full) const;
   };
   struct MatrixSparseInt
   {
@@ -62,7 +64,9 @@ namespace IIA_Internal
     // constructor
     MatrixSparseInt(IAResultImplementation *result_ptr) : result(result_ptr){}
     // copy constructor, copies up to row MaxMRow
-    MatrixSparseInt(MatrixSparseInt&M,int MaxMRow);
+    MatrixSparseInt(const MatrixSparseInt&M, int MaxMRow);
+    // copy constructor, concatenate M[1:MaxMRow,:] and N
+    MatrixSparseInt(const MatrixSparseInt&M, int MaxMRow, const MatrixSparseInt&N);
 
     const IAResultImplementation *get_result() const {return result;}
 
@@ -80,6 +84,8 @@ namespace IIA_Internal
     void matrix_row_us_minus_vr(int r, int s, int u, int v) { matrix_row_us_minus_vr(rows[r], rows[s], s, &col_rows, u, v); }
     // s = u*s - v*r, with u and v chosen so that s[c]==0, for all rows s containing c except r
     void matrix_allrows_eliminate_column(int r, int c, vector<int> *rhs = nullptr); // eliminate c from all rows except r
+    virtual void allrows_eliminate_column(int r, int c); // with rhs=nullptr
+
     
     // Gaussian elimination, specialized for creating a new_row that isn't blocked (that we know of).
     // starting from row 0, as if blocking_cols[0] was the first column etc.
@@ -90,24 +96,40 @@ namespace IIA_Internal
 
     
     // swap rows, update columns
-    void matrix_row_swap(int r, int s);
+    virtual void row_swap(int r, int s);
+    virtual void row_negate(int r); // row = -row
     // swap cols, update the rows
     // void matrix_col_swap(int c, int d); // don't use, instead we keep a column order vector
     
     // T = transpose of this matrix if num_rows and num_cols are not given;
     //     else transpose of this's submatrix rows [0,num_rows), [0,num_cols)
-    void transpose(MatrixSparseInt &T, size_t num_rows=0, size_t num_cols=0);
-    void identity(MatrixSparseInt &I, size_t sz);
+    void transpose(MatrixSparseInt &T, size_t num_rows=0, size_t num_cols=0) const;
+    static void identity(MatrixSparseInt &I, size_t sz);
     
     // y = Ax, treating x and y as column vectors
     // return false if the problem is illformed
-    bool multiply(const vector<int> &x, vector<int> &y);
-    
+    bool multiply(const vector<int> &x, vector<int> &y) const;
+
     // set rsc to be the columns in row r or row s, in sorted order.
     void row_union(int r, int s, vector<int> &rsc);
     
     // create a copy of row as the new last row, return the row number
     int push_row(const RowSparseInt &row);
+    
+    // construct HermiteNormalForm for this
+    // specifically, for the submatrix this[0..this_rows-1][0..this_cols-1]
+    // assumes there are no zero rows
+    bool HNF(int this_rows, int this_cols, MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order, vector<int> &g) const;
+    // find the submatrix this[0..r, 0..c] that prunes off non-zero rows and columns from this
+    void nonzero(int &r, int &c) const;
+    // true if Ax=b, where this==A
+    bool verify_Ax_b(const vector<int> &x, const vector<int> &b) const;
+    // least common multiple of non-zero
+    int lcm_entries() const;
+    
+    // multiply the row by some integer so that
+    //   leading entry is positive and as small as possible
+    virtual void row_simplify(int r);
     
   public: // data
     IAResultImplementation *result;
@@ -256,6 +278,11 @@ namespace IIA_Internal
     void print_solution_summary(string prefix) const;
     void print() const;
     
+    // research options
+    bool turn_on_pave_research_code = true; // Default true. If true, then copy mapping nullspace to create local/intuitive paving nullspace vectors.
+    bool try_rref_satisfy_constraints = true; // Default true. If false, then always do HNF first.
+    bool satisfy_constraints_only = false; // Default false. If true, don't attempt to satisfy_bounds or improve_solution
+
   protected: // data
     
     bool hasBeenSolved=false;
@@ -300,10 +327,10 @@ namespace IIA_Internal
     // convert parent's mapping-phase nullspace vectors to sub_problem's sumeven-phase nullspace vectors, possibly containing dummy variables
     void transfer_parent_nullspace_to_subs(vector<IncrementalIntervalAssignment*> &sub_problems);
 
-    bool tiny_subspace(int c, MatrixSparseInt &M);
+    bool tiny_subspace(int c, MatrixSparseInt &M, MatrixSparseInt &MN);
     // find a tiny subset of the matrix that contains the column c, and some some columns of the rows with c,
     //   and enough rows that the nullspace has dimension >= 1
-    // add those new nullspace rows to M
+    // add those new nullspace rows to M and MN
     // return false if we couldn't find a reasonable subspace
 
     void recursively_add_edge( int int_var_column,
@@ -354,13 +381,6 @@ namespace IIA_Internal
     void print_row_iia(size_t r) const;
     void print_col_iia(size_t c) const;
     
-    // Put matrix into HNF Hermite Normal Form.
-    //   Like RREF but using column operations. For solving initial constraints.
-    //   "this" is A.  AU = (B 0) for column operations U.
-    bool HNF(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order);
-    // use the HNF to solve Ax=b for x, i.e. satisfy the constraints but not the bounds
-    bool HNF_satisfy_constraints(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order);
-    
     // transform data to reduced row echelon form
     //   return true if sucessful
     //   two ways of selecting pivots: pick coeff 2 sum-even dummies for bounds, but not constraints
@@ -379,13 +399,23 @@ namespace IIA_Internal
     bool rref_step_numrows(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_step_numrowsV2(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
 
-    void row_swap(int r, int s);
+    // Put matrix into HNF Hermite Normal Form.
+    //   Like RREF but using column operations. For solving initial constraints.
+    //   "this" is A.  AU = (B 0) for column operations U.
+    bool HNF(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order, vector<int> &g);
+    // use the HNF to solve Ax=b for x, i.e. satisfy the constraints but not the bounds
+    bool HNF_satisfy_constraints(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order, const vector<int> &g);
+    // implementation, useful for other contexts
+    static bool HNF_satisfy_rhs(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order,
+                                const vector<int> &rhs, vector<int> &col_solution, int col_size, const vector<int> &g);
+
+    virtual void row_swap(int r, int s) override;
+    virtual void row_negate(int r) override;
     // void col_swap(int c, int d); // this messes up the layout of IntVars and dummies, instead keep a new order in a vector
-    
-    // multiply the row by some integer so that
-    //   leading entry is positive and as small as possible
-    // return the multiplier
-    void row_simplify(int r);
+
+    virtual void allrows_eliminate_column(int r, int c) override; // with rhs
+
+    virtual void row_simplify(int r) override;
     
     // get the greatest common divisor of matrix entries in this column, using only rows r and following
     int gcd_col(int r, int c);
@@ -416,24 +446,24 @@ namespace IIA_Internal
 
     // find initial feasible solution, satisfying constraints
     // return true if successful
-    bool satisfy_constaints(const vector<int>&cols_dep,
+    bool satisfy_constraints(const vector<int>&cols_dep,
                             const vector<int>&cols_ind,
                             const vector<int>&rows_dep);
     
     // find initial feasible solution, satisfying constraints + variable bounds
-    //   on input, solution already satisfies constraints, here we use nullspace M to increment intervals to satisfy bounds
-    //   in the second version, we search for rows from N as well, but don't do Gaussian Elimination on them if blocked
-    bool satisfy_bounds(MatrixSparseInt&M, int MaxMrow);
-    bool satisfy_bounds(MatrixSparseInt&M, int MaxMrow, MatrixSparseInt&N, int MaxNrow);
+    //   On input, solution already satisfies constraints,
+    //   Use nullspace MN to increment intervals to satisfy bounds
+    //     do Gaussian Elimination on M if blocked
+    bool satisfy_bounds(const MatrixSparseInt&M, MatrixSparseInt&MN);
 
     // used by satisfy_bounds
     bool unbounded_bounds_improvement(int tc, int dx, map<int,int> &improved_cols,
                                       QWithReplacement &Q, SetValuesFn &val_bounds_Q, const double threshold,
-                                      const MatrixSparseInt &M, int MaxMrow,
+                                      const MatrixSparseInt &MN,
                                       BlockingCols &blocking_cols, vector<int> &deferred_rows);
     bool any_bounds_improvement(int tc, int dx, map<int,int> &improved_cols,
                                 QWithReplacement &Q, SetValuesFn &val_bounds_Q, const double threshold,
-                                const MatrixSparseInt &M, int MaxMrow, BlockingCols &blocking_cols, vector<int> &deferred_rows,
+                                const MatrixSparseInt &MN, BlockingCols &blocking_cols, vector<int> &deferred_rows,
                                 int &smallest_self_block_coeff, bool &give_up);
     
 
@@ -475,12 +505,12 @@ namespace IIA_Internal
     
     // make a feasible solution better, using rows of nullspace matrix M.
     // Searches for a local min of the max deviation from goals.
-    void improve_solution(MatrixSparseInt&M, int MaxMrow, MatrixSparseInt&N);
+    void improve_solution(const MatrixSparseInt&M, MatrixSparseInt&MN);
     
     // make a feasible solution better, using rows of nullspace matrix M.
     // call after improve_solution is done,
     // see if there is anything else we can do to improve the lexicographic solution, even if the max cannot be improved
-    void fine_tune(MatrixSparseInt&M, MatrixSparseInt&N);
+    void fine_tune(const MatrixSparseInt&MN);
     
     //*** end: only works after we've called rref
     
@@ -539,10 +569,22 @@ namespace IIA_Internal
     // + = need to increase, - = need to decrease. Uses passed in value v rather than IIA's solution value
     int compute_out_of_bounds(int c, int v) const;
     
+    // assign a quality to using row m to increment x[tc]+=dx
+    //   criteria
+    //     primary: keep row variables in bounds (or moving them closer to in bounds)
+    //       return false if a row variable gets more out-of-bounds
+    //     secondary: moving row variables towards their goals
+    //   store an aggregate score for the row in rows_by_quality
+    // return true if m was added to rows_by_quality
+    // for choosing the best row, not just the first one that works.
+    //   be sure to sort rows_by_quality after calling this on all candidate rows
+    bool queue_rows_by_quality( int tc, int dx, const MatrixSparseInt &MN, int m,
+                               vector< pair<int /*row*/, double /*quality*/> > &rows_by_quality);
+
     bool verify_full_solution(bool print_unsatisfied_constraints, bool pretend_solved = false) const;
     
     // increase the solution by dx times R. Returns true if the solution is (still) within bounds
-    bool increment_solution(RowSparseInt &R, int dx);
+    bool increment_solution(const RowSparseInt &R, int dx);
 
     // accept_strict_improvement
     //   if the solution strictly improves
@@ -574,7 +616,7 @@ namespace IIA_Internal
                         SetValuesFn *constraint_fn,
                         double constraint_threshold );
     
-    void compute_quality_ratio(vector<QElement> &q, vector<int> &cols);
+    void compute_quality_ratio(vector<QElement> &q, const vector<int> &cols);
     
     
     // get the top of the Q, after ensuring it is up to date
@@ -752,7 +794,38 @@ namespace IIA_Internal
       v*=k;
   }
 
-  
+inline
+void MatrixSparseInt::row_negate(int r)
+{
+  for (auto &v : rows[r].vals)
+  {
+    v = -v;
+  }
+}
+
+inline
+void IncrementalIntervalAssignment::row_negate(int r)
+{
+  MatrixSparseInt::row_negate(r);
+  rhs[r]=-rhs[r];
+  if (constraint[r] == IIA::LE)
+    constraint[r] = IIA::GE;
+  else if (constraint[r] == IIA::GE)
+    constraint[r] = IIA::LE;
+}
+
+inline
+void MatrixSparseInt::allrows_eliminate_column(int r, int c)
+{
+  matrix_allrows_eliminate_column(r, c, nullptr);
+}
+inline
+void IncrementalIntervalAssignment::allrows_eliminate_column(int r, int c)
+{
+  matrix_allrows_eliminate_column(r, c, &rhs);
+}
+
+
 } // namespace
 
 #endif  // INCREMENTALINTERVALASSIGNMENT_HPP

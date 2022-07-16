@@ -108,8 +108,6 @@ namespace IIA_Internal
     }
   }
   
-  
-  
   void print_vec(IAResultImplementation *result, const std::vector<int> &vec, bool lf)
   {
     if (!result->message_log)
@@ -119,7 +117,7 @@ namespace IIA_Internal
     if (lf)
       result->info_message("\n");
   }
-  
+
   void print_vec(IAResultImplementation *result, const std::vector< std::pair<int,int> > &vec)
   {
     if (!result->message_log)
