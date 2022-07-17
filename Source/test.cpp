@@ -5,7 +5,10 @@
 #include "CpuTimer.h"
 #include <iostream>
 
-  void iia_cubit_autotest();
+#include "iia-cubit-autotest-scale-cren.h"
+
+// #include "iia-cubit-autotest-alltests.cpp"
+// void iia_cubit_autotest() {}
 // void iia_cubit_test_problem_scale_cren_AA();
 
 // tests
@@ -135,7 +138,6 @@ void test_solution_autogen(IIA::IA &ia, std::vector<int> expected_solution)
   return test_solution_autogen(ia, expected_solution, 1);
 }
 
-
 void setup_io(const IIA::IAResult *result)
 {
   result->message_log = &std::cout;
@@ -231,6 +233,41 @@ void shuffle_solution(IIA::IA &ia, std::vector<int> &expected_solution, const st
   }
   // if got to here, all is well
   expected_solution.swap(new_solution);
+}
+
+void test_problem_HNF_A()
+{
+  // test solving a single equality constraint, with large goals, to see if HNF can get it right
+  // x0 - x1 = 2
+  // g[0]=4
+  // g[1]=4
+  // expect solution [2,2]
+  std::cout << "test_problem_HNF_A  start: ";
+  
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  ia.get_result()->log_info=true;
+  ia.get_result()->log_debug=true;
+
+  ia.resize(1,2);
+  std::vector<int> cols = {0, 1};
+  std::vector<int> vals = {1, -1};
+  ia.set_rhs(0,2); // set rhs to non-zero to skip the tied variables part
+  ia.set_row(0,cols,vals);
+  const int g=4; // -17, 0, 4, 6, 11
+  ia.set_goal(0,g);
+  ia.set_goal(1,g);
+  ia.solve();
+  // iia.satisfy_only = true;
+  
+  test_result(ia);
+  // 1, -1 is solution regardless of goals if HNF doesn't consider goals, uses default e=1
+  // 9,  7 is solution regardless of goals if HNF doesn't consider goals, uses default e=-7
+  std::vector<int> expected_solution = {g+2,g}; // constraints-only solution ??
+  // std::vector<int> expected_solution = {g+1,g-1}; // optimal solution
+  test_solution(ia,expected_solution);
+  
+  std::cout << "test_problem_A  end." << std::endl;
 }
 
 
@@ -857,9 +894,8 @@ void test_problem_even_A()
     
     IIA::IA ia;
     setup_io(ia.get_result());
-//    ia.get_result()->log_info = true;
-//    ia.get_result()->log_debug = true;
-
+    // ia.get_result()->log_info = true;
+    // ia.get_result()->log_debug = true;
     
     ia.resize(3,10);
     // map
@@ -873,8 +909,8 @@ void test_problem_even_A()
     std::vector<int> cols = {0,  1,  2,  3,  8};
     std::vector<int> vals = {1,  1,  1,  1, -2};
     ia.set_row(1,cols,vals);
-    // ia.set_bound_lo( 8, 2 );
-    ia.set_bound_lo( 8, 8 ); // try 8, see if the nullspace row is used // zzyk
+    ia.set_bound_lo( 8, 2 );
+    // ia.set_bound_lo( 8, 8 ); // try 8, see if the nullspace row is used // zzyk
     }
     {
     std::vector<int> cols = {4,  5,  6,  7,  9};
@@ -979,8 +1015,8 @@ void test_problem_even_B()
   
   IIA::IA ia;
   setup_io(ia.get_result());
-//  ia.get_result()->log_info = true;
-//  ia.get_result()->log_debug = true;
+  ia.get_result()->log_info = true;
+  ia.get_result()->log_debug = false;
   
   ia.resize(2,7);
   // pave
@@ -1026,8 +1062,8 @@ void test_problem_even_C()
   
   IIA::IA ia;
   setup_io(ia.get_result());
-//  ia.get_result()->log_info = true;
-//  ia.get_result()->log_debug = true;
+  // ia.get_result()->log_info = true;
+  // ia.get_result()->log_debug = true;
   
   ia.resize(4,12);
   // map
@@ -1148,15 +1184,17 @@ namespace IIA_Internal
   
   bool IIATester::test_hnf_solver(std::vector<int> &expected_solution, std::vector<int> *nullspace_vector, bool expect_fail)
   {
+    // set goals equal to expected solution
+    vector<int> goals(expected_solution);
     IIA_Internal::MatrixSparseInt B(result), U(result);
     std::vector<int> hnf_col_order;
-    auto OK = HNF(B,U,hnf_col_order);
+    auto OK = HNF(B,U,hnf_col_order,goals);
     if (!OK)
     {
       std::cout << "ERROR: HNF failed\n";
       return false;
     }
-    OK = HNF_satisfy_constraints(B,U,hnf_col_order);
+    OK = HNF_satisfy_constraints(B,U,hnf_col_order,goals);
     if (!OK)
     {
       if (!expect_fail)
@@ -1400,11 +1438,17 @@ int main(int argc, const char * argv[])
 {
   CpuTimer total_timer;
   
+  test_problem_HNF_A(); return 0;
+  
+  // iia_cubit_test_problem_1583197819390(); return 0;
+  // iia_cubit_test_problem_1583198028742(); return 0;
+  
   // test sum-even research code
-//   test_problem_even_A();
-//   test_problem_even_AA();
-//   test_problem_even_B();
-//   test_problem_even_C();
+//  test_problem_even_A();
+//  test_problem_even_AA();
+//  test_problem_even_B();
+//  test_problem_even_C();
+  // return 0;
   
 //  iia_cubit_test_problem_scale_cren_AA();
 //  double time_used = total_timer.cpu_secs();
@@ -1412,7 +1456,7 @@ int main(int argc, const char * argv[])
 //
   // return 0;
   
-  iia_cubit_autotest();
+  // iia_cubit_autotest();
   return 0;
   
   // test Reduce Row Echelon RREF and Hermite Normal Form HNF matrix routines
