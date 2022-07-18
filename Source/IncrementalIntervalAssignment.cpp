@@ -2231,55 +2231,39 @@ namespace IIA_Internal
     SetValuesRatio fn;
     q.clear();
     q.reserve( cols.size()*2 );
+    double glo, ghi;
     for (auto c : cols)
     {
-      double glo, ghi;
-      // hi
+      // tied, set to worse of ghi and glo
       if (compute_tied_goals(c,glo,ghi))
       {
-        q.emplace_back();
-        auto &qe = q.back();
-        qe.c = c;
-        qe.solution = col_solution[c];
-        qe.solution_set = true;
-        fn.set_values_goal(*this,ghi,qe);
+        // hi
+        QElement qhi;
+        qhi.c = c;
+        qhi.solution = col_solution[c];
+        qhi.solution_set = true;
+        // lo
+        QElement qlo(qhi);
+
+        fn.set_values_goal(*this,ghi,qhi);
+        fn.set_values_goal(*this,glo,qlo);
+        
+        // assign the larger value
+        q.push_back( qlo<qhi ? qhi : qlo );
       }
-      // lo
+      // not tied, lo==hi
+      else
       {
+        assert(glo==ghi);
         q.emplace_back();
         auto &qe = q.back();
         qe.c = c;
         qe.solution = col_solution[c];
         qe.solution_set = true;
-        fn.set_values_goal(*this,glo,q.back());
+        fn.set_values_goal(*this,glo,qe);
       }
     }
     sort(q.begin(),q.end());
-  }
-  
-  bool is_better( vector<QElement> &qA, vector<QElement> &qB)
-  {
-    // true if A<B by lexicographic min max
-    //   true if A[i]<B[i] for some i and A[j]<=B[j] for all j>i
-    
-    assert(qA.size()==qB.size());
-    if (qA.empty())
-      return false;
-    
-    // start at back, largest element
-    for (int i = (int) qA.size()-1; i>=0; --i)
-    {
-      if (qA[i] < qB[i])
-      {
-        return true;
-      }
-      else if (qB[i] < qA[i])
-      {
-        return false;
-      }
-    }
-    // every element was equal
-    return false;
   }
   
   bool IncrementalIntervalAssignment::increment_solution(const RowSparseInt &R, int dx)
@@ -2331,7 +2315,7 @@ namespace IIA_Internal
         if (increment_solution(R,1))
         {
           compute_quality_ratio(qnew,R.cols);
-          if (is_better(qnew,qold))
+          if (1==is_better(qnew,qold))
           {
             improved = true;
             //          result->info_message("fine tune made an improvement using row %lu = ", (unsigned int) i);
@@ -2344,7 +2328,7 @@ namespace IIA_Internal
         if (increment_solution(R,-2))
         {
           compute_quality_ratio(qnew,R.cols);
-          if (is_better(qnew,qold))
+          if (1==is_better(qnew,qold))
           {
             improved = true;
             //          result->info_message("fine tune made an improvement using row %lu = ", (unsigned int) i);
@@ -7481,5 +7465,161 @@ namespace IIA_Internal
     
     // don't do anything with result
   }
+  
+  char letter_diff(const QElement &qe1, const QElement &qe2, double &v1, double &v2)
+  {
+    if (qe1.valueA!=qe2.valueA) {v1=qe1.valueA; v2=qe2.valueA; return 'A';}
+    if (qe1.valueB!=qe2.valueB) {v1=qe1.valueB; v2=qe2.valueB; return 'B';}
+    if (qe1.valueC!=qe2.valueC) {v1=qe1.valueC; v2=qe2.valueC; return 'C';}
+    /*  all three same, use A*/ {v1=qe1.valueA; v2=qe2.valueA; return '=';}
+  }
+  
+  int IncrementalIntervalAssignment::is_better( vector<QElement> &qA, vector<QElement> &qB ) const
+  {
+    // 1 if A<B by lexicographic min max
+    //   1 if A[i]<B[i] for some i and A[j]<=B[j] for all j>i
+    
+    assert(qA.size()==qB.size());
+    if (qA.empty())
+      return 0;
+    
+    // start at back, largest element
+    for (int i = ((int) qA.size())-1; i>=0; --i)
+    {
+      if (qA[i] < qB[i])
+      {
+        if (result->log_debug)
+        {
+          double vA, vB;
+          auto c = letter_diff(qA[i], qB[i], vA, vB);
+          const int max_place = ((int) qA.size())-1;
+          const int place = max_place-i;
+          result->debug_message("X<Y value%c %5.3g < %5.3g at place %d of %d, for X:x%d and Y:x%d\n", c, vA, vB, place, max_place, qA[i].c, qB[i].c );
+        }
+        return 1;
+      }
+      else if (qB[i] < qA[i])
+      {
+        if (result->log_debug)
+        {
+          double vA, vB;
+          auto c = letter_diff(qA[i], qB[i], vA, vB);
+          const int max_place = ((int) qA.size())-1;
+          const int place = max_place-i;
+          result->debug_message("X>Y value%c %5.3g > %5.3g at place %d of %d, for X:x%d and Y:x%d\n", c, vA, vB, place, max_place, qA[i].c, qB[i].c );
+        }
+        return -1;
+      }
+    }
+    // every element was equal
+    return 0;
+  }
 
+  int truncate_trailing_zeros( vector<double> &R )
+  {
+    int i=0;
+    for( ; i<R.size() && R[i]>0.; ++i ) {}
+    int R_trailing_zeros = R.size()-i;
+    R.resize(i);
+    return R_trailing_zeros;
+  }
+
+  int IncrementalIntervalAssignment::solution_is_better_than_Y(vector<int> &Y,
+                                                               bool print_summary, bool print_detail )
+  {
+    return solution_X_is_better_than_Y( col_solution, Y, print_summary, print_detail);
+  }
+  int IncrementalIntervalAssignment::solution_X_is_better_than_Y(vector<int> &X, vector<int> &Y,
+                                                                 bool print_summary, bool print_detail )
+  {
+    // compute R for X and Y
+    // sort by increasing R
+    // see which is lexicographically better
+
+    // number of columns, safe, min
+    int nc = std::min( {num_cols(), (int)X.size(), (int)Y.size()} );
+    std::vector<int> cols0n(nc);
+    std::iota(cols0n.begin(), cols0n.end(), 0);
+
+    vector<QElement> qX, qY;
+    qX.reserve(nc);
+    qY.reserve(nc);
+
+    // X
+    col_solution.swap(X);
+    compute_quality_ratio(qX,cols0n);
+    col_solution.swap(X);
+
+    // Y
+    col_solution.swap(Y);
+    compute_quality_ratio(qY,cols0n);
+    col_solution.swap(Y);
+
+    // lex compare
+    auto old_debug = result->log_debug;
+    if (print_summary)
+    {
+      result->log_debug=true;
+    }
+    auto rc = is_better(qX,qY);
+    
+    // print which was better
+    if (print_summary)
+    {
+      if (rc==1)
+      {
+        result->info_message("solution R(X) < R(Y)\n");
+      }
+      else if (rc==-1)
+      {
+        result->info_message("solution R(X) > R(Y)\n");
+      }
+      else
+      {
+        assert(rc==0);
+        result->info_message("solution R(X) == R(Y)\n");
+      }
+    }
+    // print actual values of X,Y, qX, qY
+    if (print_detail)
+    {
+      result->info_message("X: ");
+      print_vec(result,X);
+      result->info_message("Y: ");
+      print_vec(result,Y);
+
+      // largest to smallest
+      vector<double> RX(nc,0), RY(nc,0);
+      int i=nc;
+      for (auto qe : qX)
+      {
+        RX[--i] = qe.valueA;
+      }
+      i=nc;
+      for (auto qe : qY)
+      {
+        RY[--i] = qe.valueA;
+      }
+      
+      // truncate tailing zeros to avoid printing them.
+      int X_trailing_zeros = truncate_trailing_zeros( RX );
+      int Y_trailing_zeros = truncate_trailing_zeros( RY );
+
+      result->info_message("valuesA, largest to smallest.\n");
+      result->info_message("R(X): ");
+      print_vec(result,RX,false);
+      if (X_trailing_zeros)
+        result->info_message(" ... and %d trailing zeros", X_trailing_zeros);
+      result->info_message("\n");
+      result->info_message("R(Y): ");
+      print_vec(result,RY,false);
+      if (Y_trailing_zeros)
+        result->info_message(" ... and %d trailing zeros", Y_trailing_zeros);
+      result->info_message("\n");
+
+    }
+    result->log_debug=old_debug;
+    return rc;
+  }
+  
 } // namespace

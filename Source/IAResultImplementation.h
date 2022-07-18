@@ -33,6 +33,7 @@ namespace IIA_Internal
   };
   
   void print_vec(IAResultImplementation *result, const std::vector<int> &vec, bool lf = true);
+  void print_vec(IAResultImplementation *result, const std::vector<double> &vec, bool lf = true);
   void print_vec(IAResultImplementation *result, const std::vector< std::pair<int,int> > &vec);
   void print_set(IAResultImplementation *result, const std::set< std::pair<int,int> > &aset);
   void print_map(IAResultImplementation *result, const std::map<int,int> &amap);

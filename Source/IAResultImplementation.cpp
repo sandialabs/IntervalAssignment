@@ -117,6 +117,16 @@ namespace IIA_Internal
     if (lf)
       result->info_message("\n");
   }
+  
+  void print_vec(IAResultImplementation *result, const std::vector<double> &vec, bool lf)
+  {
+    if (!result->message_log)
+      return;
+    for (auto v : vec)
+      result->info_message(" %5.3g",v);
+    if (lf)
+      result->info_message("\n");
+  }
 
   void print_vec(IAResultImplementation *result, const std::vector< std::pair<int,int> > &vec)
   {

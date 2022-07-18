@@ -194,6 +194,15 @@ namespace IIA_Internal
     //   if first_time is set to true, then we solve from scratch and not re-solve no matter what.
     bool solve( bool do_improve = true, bool first_time = false );
 
+    // Compare quality ratio of solution X to solution Y, lex min max, using is_better
+    //   1 if qX<qY
+    //  -1 if qY<qX
+    //   0 if qX==qY
+    // X and Y are conceptually const
+    int solution_X_is_better_than_Y( vector<int> &X, vector<int> &Y, bool print_summary, bool print_detail );
+    // X == col_solution
+    int solution_is_better_than_Y( /*col_solution,*/ vector<int> &Y, bool print_summary, bool print_detail );
+
     // has the problem been solved. Changing the problem will set this flag to false
     int get_is_solved() const;
     // set_is_unsolved will also ensure than next call to solve will start from scratch
@@ -610,7 +619,7 @@ namespace IIA_Internal
                                    BlockingCols &blocking_cols,
                                    int &num_block,
                                    map<int,int> &improved_cols);
-    
+
     bool is_improvement(QElement &s,
                         QElement &t,
                         SetValuesFn *constraint_fn,
@@ -618,7 +627,14 @@ namespace IIA_Internal
     
     void compute_quality_ratio(vector<QElement> &q, const vector<int> &cols);
     
-    
+    // compare by lexicographic min max
+    // return
+    //   1 if A<B
+    //  -1 if B<A
+    //   0 if A==B
+    // this IIA is only used for printing
+    int is_better( vector<QElement> &qA, vector<QElement> &qB ) const;
+
     // get the top of the Q, after ensuring it is up to date
     // if true, Q is empty and the returned QElement is just the default, and shouldn't be processed
     bool tip_top( priority_queue<QElement> &Q, SetValuesFn &val_fn, double threshold, QElement &t );

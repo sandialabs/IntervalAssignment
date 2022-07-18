@@ -268,5 +268,10 @@ namespace IIA
     return ia->get_solution();
   }
   
+  int IA::solution_is_better_than_Y( std::vector<int> &Y, bool print_summary, bool print_detail )
+  {
+    return ia->solution_is_better_than_Y( Y, print_summary, print_detail );
+  }
+  
 } // namespace
 

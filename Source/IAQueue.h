@@ -176,9 +176,6 @@ namespace IIA_Internal
   private:
     vector <int> workspace;
   };
-
-  // true if A<B by lexicographic min max
-  bool is_better( vector<QElement> &qA, vector<QElement> &qB);
   
   // like a priority queue but you can update the priority of an element higher or lower. Based on set sorting.
   class QWithReplacement

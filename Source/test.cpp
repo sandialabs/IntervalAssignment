@@ -5,9 +5,9 @@
 #include "CpuTimer.h"
 #include <iostream>
 
-#include "iia-cubit-autotest-scale-cren.h"
-
-// #include "iia-cubit-autotest-alltests.cpp"
+// #include "iia-cubit-autotest-scale-cren.h"
+#include "iia-cubit-autotest-alltests.cpp"
+// #include "iia-cubit-autotest-onetest.cpp"
 // void iia_cubit_autotest() {}
 // void iia_cubit_test_problem_scale_cren_AA();
 
@@ -51,6 +51,21 @@ double f(int x_int, double g, int &dx)
 
 void test_solution_autogen(IIA::IA &ia, std::vector<int> expected_solution, int dx)
 {
+  int mine_better = ia.solution_is_better_than_Y( expected_solution, true, false );
+  if (mine_better==1)
+  {
+    std::cout << "Current solution is better than old solution :-)\n";
+  }
+  else if (mine_better==-1)
+  {
+    std::cout << "Old solution was better. Debug what went wrong :-(\n";
+  }
+  else
+  {
+    assert(mine_better==0);
+    std::cout << "Current and old solutions have equal quality :-|\n";
+  }
+  
   // set dx = 0 for testing pave sum-even research code
   dx=0;
   
@@ -1436,9 +1451,8 @@ namespace IIA_Internal
 
 int main(int argc, const char * argv[])
 {
-  CpuTimer total_timer;
-  
-  test_problem_HNF_A(); return 0;
+ 
+  // test_problem_HNF_A(); return 0;
   
   // iia_cubit_test_problem_1583197819390(); return 0;
   // iia_cubit_test_problem_1583198028742(); return 0;
@@ -1450,14 +1464,14 @@ int main(int argc, const char * argv[])
 //  test_problem_even_C();
   // return 0;
   
+//  CpuTimer total_timer;
 //  iia_cubit_test_problem_scale_cren_AA();
 //  double time_used = total_timer.cpu_secs();
 //  std::cout << "main time used " << time_used << std::endl;
 //
   // return 0;
   
-  // iia_cubit_autotest();
-  return 0;
+  iia_cubit_autotest(); return 0;
   
   // test Reduce Row Echelon RREF and Hermite Normal Form HNF matrix routines
   using IIA_Internal::IIATester;
