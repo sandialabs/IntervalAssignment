@@ -549,10 +549,10 @@ namespace  IIA_Internal
     }
     else
     {
-      qe.valueA = glo;
-      qe.valueB = R;
+      qe.valueA = glo; // empirically glo makes a big difference
+      qe.valueB = R; // empirically valueB doesn't make a difference
     }
-    // qe.valueC = ; // could set to number of rows...
+    // qe.valueC = ; // could set to number of rows... wouldn't make a difference
     
   }
   
