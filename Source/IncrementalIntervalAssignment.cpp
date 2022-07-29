@@ -153,7 +153,7 @@ namespace IIA_Internal
   MatrixSparseInt::MatrixSparseInt(const MatrixSparseInt&M, int MaxMRow, const MatrixSparseInt&N) : result(M.result)
   {
     rows.reserve(MaxMRow+N.rows.size());
-    copy(N.rows.begin(),N.rows.begin(),back_inserter(rows));
+    copy(N.rows.begin(),N.rows.end(),back_inserter(rows));
     copy(M.rows.begin(),M.rows.begin()+MaxMRow,back_inserter(rows));
     col_rows.resize(M.col_rows.size());
     fill_in_cols_from_rows();
@@ -187,6 +187,186 @@ namespace IIA_Internal
     }
   }
   
+  bool IncrementalIntervalAssignment::decide_roundup(int r, int c) const
+  {
+    // bounds
+    const auto oob_lo = compute_out_of_bounds(c, col_solution[c]);
+    const auto oob_hi = compute_out_of_bounds(c, col_solution[c]+1);
+    if (oob_lo>0)
+      return true;
+    else if (oob_hi<0)
+      return false;
+    else
+    {
+      // can round up or down and still be in bounds
+      
+      const auto coeff = rows[r].get_val(c);
+      
+      // secondary criteria:
+      //   goals vs. solution of vars in row[c]
+      auto signed_diff_sum = 0.; // sum of solution-goal
+      for (int j = 0; j < (int) rows[r].cols.size(); ++j)
+      {
+        const auto cc = rows[r].cols[j];
+        const auto vv = rows[r].vals[j];
+        const auto s = get_solution(cc);
+
+        const auto opposite_actions = (cc != c && coeff>0 == vv>0);
+        
+        const auto oob_cc_up = compute_out_of_bounds(cc, s+1);
+        const auto oob_cc_dn = compute_out_of_bounds(cc, s-1);
+        
+        if (oob_cc_dn>0) // we want cc to increase (or not decrease) to stay in bounds
+        {
+          if (c!=cc)
+          {
+            if (opposite_actions)
+              signed_diff_sum -= oob_cc_dn; // subtract positive value -> decreases desire of roundup
+            else
+              signed_diff_sum += oob_cc_dn; // add positive value -> increases
+          }
+        }
+        else if (oob_cc_up<0) // we want cc to decrease (or not increase) to stay in bounds
+        {
+          if (c!=cc)
+          {
+            if (opposite_actions)
+              signed_diff_sum -= oob_cc_dn; // subtract negative value -> increases
+            else
+              signed_diff_sum += oob_cc_dn; // add negative value -> decreases
+          }
+        }
+        else // if (oob_cc_up == 0 && oob_cc_dn == 0)
+        {
+          double glo, ghi;
+          get_tied_goals(cc, glo, ghi);
+          const auto g = (glo==ghi ? glo : sqrt(glo*ghi));
+          if (g!=0.)
+          {
+            const auto signed_diff = s-g;
+            
+            // does rounding up encourage cc to increase or decrease?
+            if (opposite_actions)
+            {
+              // rounding up causes cc to decrease.
+              // If signed_diff>0, then rounding up is good
+              signed_diff_sum += signed_diff;
+            }
+            else
+            {
+              // rounding up causes cc to increase.
+              // If signed_diff<0, then rounding up is good
+              signed_diff_sum -= signed_diff;
+            }
+            
+          }
+        }
+      }
+      return (signed_diff_sum >= -3.1); // empirical threshold
+    }
+  }
+  
+  // d = a/b, return true if a%b != 0
+  // always round d down for fractional d
+  // e.g. -7/2 = -4, and 7/2 = 3
+  //   platform-independent results for negative values by avoiding negative values during division and mod
+  bool a_div_b( int &d, int a, int b)
+  {
+    assert(b!=0);
+    d = abs(a) / abs(b); // always positive, rounded towards zero
+    const bool is_neg = ((a>=0) != (b>0)); // true if (a/b)<0 <--> a*b<0 <--> sign(a) != sign(b)
+    const bool is_frac = (abs(a) % abs(b) != 0);
+    if (is_neg)
+    {
+      d = -d;
+      if (is_frac)
+      {
+        --d;
+      }
+    }
+    return is_frac;
+  }
+  
+  void test_a_div_b()
+  {
+    int d;
+    for (int a=-9; a<10; ++a)
+      for( int b=-9; b<10; ++b)
+      {
+        if (b==0)
+          continue;
+        const bool is_frac = a_div_b( d, a, b);
+        printf("%d = %d / %d is %s.\n", d, a, b, (is_frac ? "fractional" : "whole"));
+      }
+  }
+  
+  bool IncrementalIntervalAssignment::assign_dependent_vars(const vector<int>&cols_dep,
+                                                            const vector<int>&rows_dep,
+                                                            vector<int>&cols_fail)
+  {
+    // test_a_div_b();
+    
+    assert(cols_dep.size()==rows_dep.size());
+    bool OK=true;
+    for (size_t i = 0; i < rows_dep.size(); ++i)
+    {
+      const auto r = rows_dep[i];
+      const auto c = cols_dep[i];
+      col_solution[c]=0; // to avoid it contributing to the row_sum
+      const int sum = row_sum(r);
+      const int coeff = rows[r].get_val(c);
+      //
+      //   col_solution[c] = -sum / coeff;
+      if (sum == 0)
+      {
+        col_solution[c] = 0;
+      }
+      else
+      {
+        assert(coeff!=0);
+        const bool is_frac = a_div_b( col_solution[c], -sum, coeff ); // solution = -sum / coeff
+        if (is_frac)
+        {
+          // we have a problem, the dependent var value is not integer (its coeff_dep is not 1)
+          OK=false;
+          cols_fail.push_back(c);
+          
+          // decide whether to round up or down
+          bool roundup = true;
+          
+          if (turn_on_research_code_adjust_for_sumeven)
+          {
+            roundup = decide_roundup(r,c);
+            result->info_message("IIA dependent var x%d = %d/%d != integer. Rounding %s.\n",
+                                 c, -sum, coeff, roundup ? "up" : "down");
+          }
+          
+          // round solution value up or down
+          if (roundup)
+            ++col_solution[c];
+          // else already rounded down, no need for --sol
+          
+          result->debug_message("IIA dependent var x%d = %d/%d != integer. Rounding up.\n",
+                                c, -sum, coeff, roundup ? "up" : "down");
+        }
+      }
+      result->debug_message("IIA Assigning dependent var x%d = %d/%d = %d%s\n",
+                            c, -sum, coeff, col_solution[c],
+                            (col_solution[c]<col_lower_bounds[c] || col_solution[c]>col_solution[c]) ? " out of bounds!" : "");
+    }
+    if (result->log_debug)
+    {
+      print_solution("after assigning dependent variables");
+      if (!cols_fail.empty())
+      {
+        result->info_message("failed-to-assign variables, cols_fail A");
+        print_vec(result, cols_fail);
+      }
+    }
+    
+    return OK;
+  }
+  
   void IncrementalIntervalAssignment::assign_dummies_feasible()
   {
     // solution_init has already been called
@@ -217,11 +397,21 @@ namespace IIA_Internal
         col_solution[c]=0;
         int sum = row_sum(r);
         int dummy_coeff = get_M(r,c);
-        col_solution[c] = -sum/dummy_coeff;
-        if (dummy_coeff != 1 && sum % dummy_coeff != 0)
+        
+        const bool is_frac = a_div_b( col_solution[c], -sum, dummy_coeff ); // solution = -sum / coeff
+        if (is_frac)
         {
-          // round col_solution up, as this causes less issues with lower bounds
-          ++col_solution[c];
+          bool roundup = true;
+          if (turn_on_research_code_adjust_for_sumeven)
+          {
+            roundup = decide_roundup(r, c);
+            result->info_message("constraint row %d not satisfied, dummy var %d rounded %s.\n",
+                                 r, c, roundup ? "up" : "down");
+          }
+          if (roundup)
+            ++col_solution[c];
+          
+          // could try adding in a mapping-phase nullspace vec here
         }
         if (result->log_debug)
         {
@@ -543,7 +733,7 @@ namespace IIA_Internal
     return 0;
   }
   
-  bool IncrementalIntervalAssignment::compute_tied_goals(int c, double &goal_lowest, double &goal_highest) const
+  bool IncrementalIntervalAssignment::get_tied_goals(int c, double &goal_lowest, double &goal_highest) const
   {
     if (has_tied_variables && tied_variables[c].size()>1)
     {
@@ -791,7 +981,7 @@ namespace IIA_Internal
     
     //rref
     // independent vars have already been assigned something
-    if (try_rref_satisfy_constraints)
+    if (!use_HNF_always)
     {
       // back-substitute values from indepedent vars to dependent vars
       rc=true; // will set it to false if it fails
@@ -864,7 +1054,7 @@ namespace IIA_Internal
   void IncrementalIntervalAssignment::build_Q(priority_queue< QElement > &Q,
                                               SetValuesFn &set_val_fn,
                                               double threshold,
-                                              const vector<int> &qcol)
+                                              const vector<int> &qcol) const
   {
     for (auto c : qcol )
     {
@@ -1122,7 +1312,10 @@ namespace IIA_Internal
     {
       queue_rows_by_quality(tc, dx, MN, m, rows_by_quality);
     }
-    sort( rows_by_quality.begin(), rows_by_quality.end(), bigger_quality);
+    if (use_best_improvement)
+    {
+      sort( rows_by_quality.begin(), rows_by_quality.end(), bigger_quality);
+    }
 
     for (auto rq : rows_by_quality)
     {
@@ -1511,7 +1704,7 @@ namespace IIA_Internal
   bool IncrementalIntervalAssignment::is_improvement(QElement &s,
                                                      QElement &t,
                                                      SetValuesFn *constraint_fn,
-                                                     double constraint_threshold )
+                                                     double constraint_threshold ) const
   {
     if (constraint_fn)
     {
@@ -1755,11 +1948,13 @@ namespace IIA_Internal
     
     // COMMIT test suite fails/passes invariant to which of thsese two priority fn we use
     // The first one worked better for the mesh scaling IIA
-    SetValuesRatioR priority_fn;  // based on current value+/-1
-    const double priority_threshold=0.01;
+    // SetValuesRatioR priority_fn;  // based on current value+/-1
+    // const double priority_threshold=0.01;
     // SetValuesRatio priority_fn;  // based on current value
     // const double priority_threshold=1.;
-    
+    SetValuesRatioG priority_fn;  // based on current value
+    const double priority_threshold=1.;
+
     SetValuesRatio quality_fn;
     const double quality_threshold=0;
     
@@ -1782,6 +1977,7 @@ namespace IIA_Internal
         untied_int_vars.push_back(c);
     }
     Q.build( untied_int_vars );
+    // Q.print();
     
     // blocking_cols are just the ones that we discovered that block the current variable from incrementing
     // all_blocking_cols are the union blocking_cols from all prior increment attempts
@@ -1831,7 +2027,7 @@ namespace IIA_Internal
         if (tied_variables[t.c].size()>1)
         {
           double glo, ghi;
-          compute_tied_goals(t.c, glo, ghi);
+          get_tied_goals(t.c, glo, ghi);
           result->debug_message("tied goals [%g, %g]\n", glo, ghi);
         }
         else
@@ -1867,7 +2063,10 @@ namespace IIA_Internal
             {
               queue_rows_by_quality(t.c, dx, MN, m, rows_by_quality);
             }
-            sort( rows_by_quality.begin(), rows_by_quality.end(), bigger_quality);
+            if (use_best_improvement)
+            {
+              sort( rows_by_quality.begin(), rows_by_quality.end(), bigger_quality);
+            }
 
             for (auto rq : rows_by_quality)
             {
@@ -2226,7 +2425,34 @@ namespace IIA_Internal
     
   }
   
-  void IncrementalIntervalAssignment::compute_quality_ratio(vector<QElement> &q, const vector<int> &cols)
+  double IncrementalIntervalAssignment::get_R(int c, int &x, double &glo, double &ghi) const
+  {
+    get_tied_goals(c,glo,ghi);
+    x = get_solution(c);
+
+    if (glo==0)
+    {
+      return 0.;
+    }
+    else
+    {
+      if (x<glo)
+      {
+        return (x>0 ? ghi/x : 1000.*ghi*(abs(x)+1.)); // safe ghi/x
+      }
+      else if (x>=ghi)
+      {
+        return x/glo;
+      }
+      // glo < x < ghi
+      else
+      {
+        return std::max( x / glo, (x>0 ? ghi/x : 1000.*ghi*(abs(x)+1.)) );
+      }
+    }
+  }
+
+  void IncrementalIntervalAssignment::compute_quality_ratio(vector<QElement> &q, const vector<int> &cols) const
   {
     SetValuesRatio fn;
     q.clear();
@@ -2235,7 +2461,7 @@ namespace IIA_Internal
     for (auto c : cols)
     {
       // tied, set to worse of ghi and glo
-      if (compute_tied_goals(c,glo,ghi))
+      if (get_tied_goals(c,glo,ghi))
       {
         // hi
         QElement qhi;
@@ -2442,46 +2668,6 @@ namespace IIA_Internal
     
     cols_fail.swap(still_fail);
     return cols_fail.empty() ? true : false;
-  }
-  
-  bool IncrementalIntervalAssignment::assign_dependent_vars(const vector<int>&cols_dep,
-                                                            const vector<int>&rows_dep,
-                                                            vector<int>&cols_fail)
-  {
-    assert(cols_dep.size()==rows_dep.size());
-    bool OK=true;
-    for (size_t i = 0; i < rows_dep.size(); ++i)
-    {
-      auto col_dep = cols_dep[i];
-      col_solution[col_dep]=0;
-      auto r = rows_dep[i];
-      int sum = row_sum(r);
-      int coeff_dep = rows[r].get_val(col_dep);
-      col_solution[col_dep] = -sum / coeff_dep;
-      if (sum % coeff_dep != 0)
-      {
-        // we have a problem, the dependent var value is not integer (its coeff_dep is not 1)
-        OK=false;
-        ++col_solution[col_dep];
-        cols_fail.push_back(col_dep);
-        result->debug_message("IIA dependent var x%d = %d/%d != integer. Rounding up.\n",
-                              col_dep, -sum, coeff_dep);
-      }
-      result->debug_message("IIA Assigning dependent var x%d = %d/%d = %d%s\n",
-                            col_dep, -sum, coeff_dep, col_solution[col_dep],
-                            (col_solution[col_dep]<col_lower_bounds[col_dep] || col_solution[col_dep]>col_solution[col_dep]) ? " out of bounds!" : "");
-    }
-    if (result->log_debug)
-    {
-      print_solution("after assigning dependent variables");
-      if (!cols_fail.empty())
-      {
-        result->info_message("failed-to-assign variables, cols_fail A");
-        print_vec(result, cols_fail);
-      }
-    }
-    
-    return OK;
   }
   
   bool IncrementalIntervalAssignment::generate_tied_data()
@@ -3537,16 +3723,20 @@ namespace IIA_Internal
   }
 
   
-  bool IncrementalIntervalAssignment::rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
+  bool IncrementalIntervalAssignment::rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map, bool map_only_phase)
   {
     if (rref_r>used_row)
       return true;
     
     result->debug_message("rref_step1\n");
     
-    SetValuesCoeffRowsGoal val_CoeffRowsGoal_Q;
+    SetValuesCoeffRowsGoal val_CoeffRowsGoal_Q; // map_only_phase
+    SetValuesCoeffRGoal val_CoeffRGoal_Q; // even phase
     QWithReplacement Q(this, val_CoeffRowsGoal_Q, numeric_limits<double>::lowest()/4);
-
+    if (!map_only_phase)
+    {
+      Q.set_val_fn(val_CoeffRGoal_Q);
+    }
     vector<int>all_vars;
     all_vars.reserve(used_col+1);
     for (int c=0; c<=used_col; ++c)
@@ -3562,6 +3752,7 @@ namespace IIA_Internal
     for (;;)
     {
       Q.build(all_vars);
+      // Q.print(); zzyk
       
       if (Q.empty())
         return true;
@@ -3893,7 +4084,7 @@ namespace IIA_Internal
     return true;
   }
   
-  bool IncrementalIntervalAssignment::rref_constraints(vector<int> &rref_col_order)
+  bool IncrementalIntervalAssignment::rref_constraints(vector<int> &rref_col_order, bool map_only_phase)
   {
     // rref data
     // col_order is implicit order of columns, the sequence in which rref eliminated them
@@ -3917,7 +4108,7 @@ namespace IIA_Internal
     
     // Step 1
     // Use any var that has a "1" for a coefficient in a row, prefering those with fewer rows
-    if (!rref_step1(rref_r, rref_col_order, rref_col_map))
+    if (!rref_step1(rref_r, rref_col_order, rref_col_map, map_only_phase))
       return false;
     
     // Step 2
@@ -3933,7 +4124,7 @@ namespace IIA_Internal
     
     return true;
   }
-  
+   
   bool IncrementalIntervalAssignment::rref_improve(vector<int> &rref_col_order)
   {
     // rref data
@@ -4345,7 +4536,7 @@ namespace IIA_Internal
       assert( col_solution == g );
       return true;
     }
-    const size_t this_rows = (size_t) r+1; // m
+    const int this_rows = r+1; // m
     
     // Reduce to non-zero columns
     int c(used_col);
@@ -4355,9 +4546,9 @@ namespace IIA_Internal
       // col_solution[c]=g[c]; // already assigned,
       --c;
     }
-    const size_t this_cols = (size_t) used_col+1; // n
+    const int this_cols = used_col+1; // n
     
-    return MatrixSparseInt::HNF(this_rows, this_cols, B, U, hnf_col_order, g);
+    return MatrixSparseInt::HNF(this_rows, this_cols, B, U, hnf_col_order, g, use_HNF_goals);
   }
 
   void MatrixSparseInt::nonzero(int &r, int &c) const
@@ -4400,7 +4591,7 @@ namespace IIA_Internal
     return true;
   }
 
-  bool MatrixSparseInt::HNF(int this_rows, int this_cols, MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order, vector<int> &g) const
+  bool MatrixSparseInt::HNF(int this_rows, int this_cols, MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order, vector<int> &g, bool use_HNF_goals) const
   {
 
     // Description of HNF Hermite Normal Form and why it is what we want to do
@@ -4714,7 +4905,16 @@ namespace IIA_Internal
     // UinvT is now just Uinv
     // apply to g
     vector<int> gg(g.size(),1.);
-    UinvT.multiply(g, gg); // comment this line out to use c = 1 for independent variables. Otherwise c = Uinv g
+    if (use_HNF_goals)
+    {
+      // use c = Uinv g for independent variables.
+      UinvT.multiply(g, gg);
+    }
+    else
+    {
+      // use c = 1 for independent variables.
+
+    }
     g.swap(gg);
     
 
@@ -5530,7 +5730,7 @@ namespace IIA_Internal
       EqualsB Bsave(*this_B);
       
       // row echelon for constraints
-      bool rref_OK = rref_constraints(rref_col_order);
+      bool rref_OK = rref_constraints(rref_col_order,map_only_phase);
       
       // debug
       if (result->log_debug)
@@ -5646,22 +5846,21 @@ namespace IIA_Internal
       cull_nullspace_tied_variable_rows(M, MaxMrow);
       
       // remove rows of Nullspace that appear in M
-      if (turn_on_pave_research_code)
+      if (use_map_nullspace)
       {
         remove_duplicate_rows(M, MaxMrow, Nullspace);
       }
       
       // debug
-      if (result->log_debug) // || turn_on_pave_research_code)
+      if (result->log_debug) // || use_map_nullspace)
       {
         M.print_matrix("M nullspace");
         // M.print_matrix_summary("M nullspace ");
-      }
-      // debug research
-      if (0) // turn_on_pave_research_code)
-      {
-        Nullspace.print_matrix("N nullspace");
-        // Nullspace.print_matrix_summary("N nullspace ");
+        if (use_map_nullspace)
+        {
+          Nullspace.print_matrix("N nullspace");
+          // Nullspace.print_matrix_summary("N nullspace ");
+        }
       }
       
       if (do_restore)
@@ -5675,6 +5874,10 @@ namespace IIA_Internal
     
     // concatenate M+N
     MatrixSparseInt MN(M,MaxMrow,Nullspace);
+    if (result->log_debug && use_map_nullspace)
+    {
+      MN.print_matrix("MN nullspace");
+    }
     
     bool in_bounds = false;
     
@@ -5735,7 +5938,7 @@ namespace IIA_Internal
       //   variables with non-1 coefficients, such as sum-even variables with a coeff of 2, were chosen as independent vars above.
       //   however, for optimization, we want them to be *dependent* variables
       
-      if (0) // turn_on_pave_research_code)
+      if (/* DISABLES CODE */ (0) && use_map_nullspace)
       {
         result->info_message("do_improve phase:\n");
         M.print_matrix("M nullspace");
@@ -6008,6 +6211,12 @@ namespace IIA_Internal
   {
     // debug
     result->info_message("Running incremental interval assignment.\n");
+    // what options were turned on
+    result->info_message("use HNF_always, HNF_goals, map_nullspace, best_improvement = %d%d%d%d\n",
+                         use_HNF_always,
+                         use_HNF_goals,
+                         use_map_nullspace,
+                         use_best_improvement);
     
     CpuTimer total_timer;
     double setup_time=0, map_time(0.);
@@ -6073,6 +6282,10 @@ namespace IIA_Internal
     result->debug_message("Solving IIA mapping subproblems.\n");
     
     bool success = solve_phase(true, do_improve, new_row_min, new_row_max);
+    if (0 && turn_on_research_code_adjust_for_sumeven)
+    {
+      print_solution_summary("solution after mapping phase");
+    }
     
     if (result->log_debug_time)
     {
@@ -6567,9 +6780,8 @@ namespace IIA_Internal
     }
 
     // gather sub-problem soutions back into this problem, copy solution to permanent storage
-    result->info_message("turn_on_pave_nullspace_research_code = %d\n",turn_on_pave_research_code);
     if ( success )
-      gather_solutions( sub_problems, turn_on_pave_research_code && map_only_phase, orphan_cols );
+      gather_solutions( sub_problems, use_map_nullspace && map_only_phase, orphan_cols );
     delete_subproblems( sub_problems );
     
     return success;
@@ -7494,7 +7706,7 @@ namespace IIA_Internal
           auto c = letter_diff(qA[i], qB[i], vA, vB);
           const int max_place = ((int) qA.size())-1;
           const int place = max_place-i;
-          result->debug_message("X<Y value%c %5.3g < %5.3g at place %d of %d, for X:x%d and Y:x%d\n", c, vA, vB, place, max_place, qA[i].c, qB[i].c );
+          result->debug_message("X<Y value%c %7.5g < %7.5g at place %d of %d, for X:x%d and Y:x%d\n", c, vA, vB, place, max_place, qA[i].c, qB[i].c );
         }
         return 1;
       }
@@ -7506,7 +7718,7 @@ namespace IIA_Internal
           auto c = letter_diff(qA[i], qB[i], vA, vB);
           const int max_place = ((int) qA.size())-1;
           const int place = max_place-i;
-          result->debug_message("X>Y value%c %5.3g > %5.3g at place %d of %d, for X:x%d and Y:x%d\n", c, vA, vB, place, max_place, qA[i].c, qB[i].c );
+          result->debug_message("X>Y value%c %7.5g > %7.5g at place %d of %d, for X:x%d and Y:x%d\n", c, vA, vB, place, max_place, qA[i].c, qB[i].c );
         }
         return -1;
       }
@@ -7517,11 +7729,11 @@ namespace IIA_Internal
 
   int truncate_trailing_zeros( vector<double> &R )
   {
-    int i=0;
+    size_t i=0;
     for( ; i<R.size() && R[i]>0.; ++i ) {}
-    int R_trailing_zeros = R.size()-i;
+    auto R_trailing_zeros = R.size()-i;
     R.resize(i);
-    return R_trailing_zeros;
+    return (int) R_trailing_zeros;
   }
 
   int IncrementalIntervalAssignment::solution_is_better_than_Y(vector<int> &Y,
@@ -7556,6 +7768,18 @@ namespace IIA_Internal
     col_solution.swap(Y);
 
     // lex compare
+    // set valuesB to 0, since that just has to do with the goals
+    // no need to re-sort, as valuesB is just a tiebreaker
+    for (auto &q : qX)
+    {
+      q.valueB = 0.;
+      q.valueC = 0.;
+    }
+    for (auto &q : qY)
+    {
+      q.valueB = 0.;
+      q.valueC = 0.;
+    }
     auto old_debug = result->log_debug;
     if (print_summary)
     {

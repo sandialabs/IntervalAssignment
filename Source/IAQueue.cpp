@@ -58,8 +58,8 @@ namespace  IIA_Internal
       qe.valueA = abs(diff);
       qe.dx = (diff > 0 ? 1 :  (diff < 0 ? -1 : 0) );
       double glo,ghi;
-      // qe.valueB = (iia.compute_tied_goals(qe.c,glo,ghi) ? abs(ghi): abs(glo));
-      bool tied = iia.compute_tied_goals(qe.c,glo,ghi);
+      // qe.valueB = (iia.get_tied_goals(qe.c,glo,ghi) ? abs(ghi): abs(glo));
+      bool tied = iia.get_tied_goals(qe.c,glo,ghi);
       if (tied)
       {
         // tied-to variables get the highest priority of all the tied variables
@@ -86,7 +86,7 @@ namespace  IIA_Internal
     if (c>-1)
     {
       double glo,ghi;
-      if (iia.compute_tied_goals(c,glo,ghi))
+      if (iia.get_tied_goals(c,glo,ghi))
       {
         QElement qh = qe;
         set_values_goal(iia,glo,qe);
@@ -147,7 +147,13 @@ namespace  IIA_Internal
         post = (x+1.)/g; // (g>1e-2 ? (x+1.)/g : 1000*(x+1)*(abs(g)+1.));
         qe.dx = 1;
       }
-      qe.valueA = pre-post; // was pre-post+1, but then goal of 1 has solution 2 and 3 to have the same value!!!
+      // qe.valueA = pre-post+1; // but then goal of 1 with solution 2 and 3 have the same value!!!
+      // qe.valueA = pre-post; // this is clearly wrong, giving values close to zero for x = g+1
+      // qe.valueA = post<pre ? post : 0; // using post value is consistent, but doesn't take into account the amount of improvement.
+      
+      // if post>=pre, then we are already as good as we can get
+      // the multiply is to favor the case of solution 3 over solution 2 for goal 1.
+      qe.valueA = pre>post ? (pre-post)*0.5 + 1 : 0.;
     }
     // a value less than 1 means the value would get worse than it is currently
     qe.valueB = -g; // prefer to change curves with small goals first, if ratios are equal
@@ -181,7 +187,7 @@ namespace  IIA_Internal
     if (c>-1)
     {
       double glo,ghi;
-      if (iia.compute_tied_goals(c,glo,ghi))
+      if (iia.get_tied_goals(c,glo,ghi))
       {
         QElement qh = qe;
         set_values_goal(iia,glo,qe);
@@ -254,6 +260,95 @@ namespace  IIA_Internal
   }
   
   
+  void SetValuesRatioG::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
+  {
+    auto &c=qe.c;
+    if (c>-1)
+    {
+      double glo,ghi;
+      if (iia.get_tied_goals(c,glo,ghi))
+      {
+        QElement qh = qe;
+        set_values_goal(iia,glo,qe);
+        set_values_goal(iia,ghi,qh);
+        // return the *higher* priority
+        if (qe<qh)
+        {
+          swap(qe,qh);
+        }
+      }
+      else
+      {
+        set_values_goal(iia,glo,qe);
+      }
+    }
+    else
+    {
+      qe.valueA = 0.;
+      qe.valueB = 0.;
+      qe.valueC = -2.;
+    }
+  }
+  
+  void SetValuesRatioG::set_values_goal(const IncrementalIntervalAssignment &iia, double g, QElement &qe )
+  {
+    assert(qe.solution_set);
+    if (g==0.) // its a "don't care" dummy variable
+    {
+      qe.valueA=0.;
+      qe.valueB=0.;
+      qe.valueC=0.;
+      return;
+    }
+    
+    int x_int = qe.solution;
+    double x = (double) x_int;
+    if (x<g)
+    {
+      qe.valueA = (x>1e-2 ? g/x : 1000.*g*(abs(x)+1.));
+      qe.dx = 1; // want increment
+      // check if increment would make it worse, though
+      if (x+1>g && (x+1)/g > qe.valueA)
+      {
+        qe.valueA = 0;
+        qe.dx = 0;
+      }
+    }
+    else
+    {
+      qe.valueA = x/g; // scaling away from zero is done within set_goal now. (g>1e-2 ? x/g : 1000*x*(abs(g)+1.));
+      qe.dx = -1; // desire decrement
+      if (x-1<g && (x<1 || g/(x-1) > qe.valueA))
+      {
+        qe.valueA = 0;
+        qe.dx = 0;
+      }
+    }
+    qe.valueB = -g;  // prefer to change curves with small goals first
+    qe.valueC = 0.;
+    
+    // if we desire increment and we are already at the upper bound, set the priority to 0
+    if (qe.dx>0)
+    {
+      if (x_int>=iia.get_upper(qe.c))
+      {
+        qe.valueA=0.;
+        qe.valueB=0.;
+        qe.valueC=0.;
+      }
+    }
+    // if we desire decrement and we are already at the lower bound, set the priority to 0
+    else
+    {
+      if (x_int<=iia.get_lower(qe.c))
+      {
+        qe.valueA=0.;
+        qe.valueB=0.;
+        qe.valueC=0.;
+      }
+    }
+  }
+  
   void SetValuesOneCoeff::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
     // valuesA = has only one coefficient, of value 1
@@ -274,7 +369,7 @@ namespace  IIA_Internal
         qe.valueB= (qe.valueC==0. ? 1 : 0);
         // pick based on lower goal, unsure what's best
         double glo, ghi;
-        iia.compute_tied_goals(c,glo,ghi);
+        iia.get_tied_goals(c,glo,ghi);
         qe.valueC=glo;
       }
     }
@@ -337,7 +432,7 @@ namespace  IIA_Internal
     if (ctype==IncrementalIntervalAssignment::INT_VAR)
     {
       double glo, ghi;
-      iia.compute_tied_goals(c,glo,ghi);
+      iia.get_tied_goals(c,glo,ghi);
       qe.valueC=glo; // prefer longer ones
     }
     else if (ctype==IncrementalIntervalAssignment::EVEN_VAR)  // sum-even
@@ -402,10 +497,65 @@ namespace  IIA_Internal
     qe.valueB = - ((double) vars.size());
     
     double glo, ghi;
-    iia.compute_tied_goals(c,glo,ghi);
+    iia.get_tied_goals(c,glo,ghi);
     qe.valueC = (glo==0. ? numeric_limits<double>::max()/2 : glo);
   }
 
+  void SetValuesCoeffRGoal::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
+  {
+    // if smallest coeff != 1, then valuesA = -inf
+    // valuesA = goals, larger is better
+    // valuesB = R, larger is better (hack try -R)
+    qe.valueA=0.;
+    qe.valueB=0.;
+    qe.valueC=0.;
+    
+    const int c = qe.c;
+    
+    int best_coeff=numeric_limits<int>::max();
+    // c is not in any row, can't choose it even if we wanted to. This happens for tied variables.
+    if (iia.col_rows[c].empty())
+    {
+      qe.valueA = numeric_limits<double>::lowest()*0.75;
+      return;
+    }
+    for (int r : iia.col_rows[c])
+    {
+      const int c_coeff = abs(iia.rows[r].get_val(c));
+      if (c_coeff<best_coeff)
+      {
+        best_coeff=c_coeff;
+      }
+    }
+    if (best_coeff != 1)
+    {
+      qe.valueA = numeric_limits<double>::lowest()/2;
+      return;
+    }
+   
+    // A=R, B=g performed poorly on average
+    // A=g, B=R performs great on average
+    
+    // todo: try weighted sum of g and R
+    int x;
+    double glo, ghi;
+    double R = iia.get_R(c, x, glo, ghi);
+
+    if (glo==0)
+    {
+      assert(glo==ghi);
+      // no goal, highly desirable
+      qe.valueA = numeric_limits<double>::max()/2;
+    }
+    else
+    {
+      qe.valueA = glo;
+      qe.valueB = R;
+    }
+    // qe.valueC = ; // could set to number of rows...
+    
+  }
+  
   void SetValuesTiny::set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe )
   {
     //     for rows with no other cols, need at least 1

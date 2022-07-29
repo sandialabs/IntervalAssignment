@@ -499,6 +499,8 @@ void test_problem_C()
   
   IIA::IA ia;
   setup_io(ia.get_result());
+  // ia.set_use_map_nullspace(true);
+  // ia.get_result()->log_debug = true;
   
   ia.resize(10,14);
   // linked
@@ -1153,7 +1155,7 @@ namespace IIA_Internal
   {
     // test putting the matrix into rref form, choosing pivots in the context of setting up to solve constraints.
     std::vector<int> rref_col_order;
-    bool rref_OK = rref_constraints(rref_col_order);
+    bool rref_OK = rref_constraints(rref_col_order, true);
     if (!rref_OK)
     {
       std::cout << "ERROR: Failed to put matrix into RREF form for constraints!\n";
@@ -1473,9 +1475,14 @@ int main(int argc, const char * argv[])
   
   iia_cubit_autotest(); return 0;
   
+  // tests where use_map_nullspace might make a difference
+  // test_problem_C();
+  // test_problem_E();
+  // test_problem_even_A();
+  // return 0;
+
   // test Reduce Row Echelon RREF and Hermite Normal Form HNF matrix routines
   using IIA_Internal::IIATester;
-  
   IIATester::test_problem0();
   IIATester::test_problem1();
   IIATester::test_problem2();

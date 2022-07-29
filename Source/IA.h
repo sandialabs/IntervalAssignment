@@ -158,6 +158,7 @@ namespace IIA
     //  -1 if Y is better
     //   0 if same
     int solution_is_better_than_Y( std::vector<int> &Y, bool print_summary, bool print_detail );
+    void set_use_map_nullspace(bool use_map_nullspace); // debug
 
     // Add more constraints
     //   after solving, add some more rows (or cols). Returns the index of the first new one.

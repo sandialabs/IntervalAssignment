@@ -119,7 +119,7 @@ namespace IIA_Internal
     // construct HermiteNormalForm for this
     // specifically, for the submatrix this[0..this_rows-1][0..this_cols-1]
     // assumes there are no zero rows
-    bool HNF(int this_rows, int this_cols, MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order, vector<int> &g) const;
+    bool HNF(int this_rows, int this_cols, MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order, vector<int> &g, bool use_HNF_goals) const;
     // find the submatrix this[0..r, 0..c] that prunes off non-zero rows and columns from this
     void nonzero(int &r, int &c) const;
     // true if Ax=b, where this==A
@@ -289,8 +289,15 @@ namespace IIA_Internal
     
     // research options
     bool turn_on_pave_research_code = true; // Default true. If true, then copy mapping nullspace to create local/intuitive paving nullspace vectors.
-    bool try_rref_satisfy_constraints = true; // Default true. If false, then always do HNF first.
     bool satisfy_constraints_only = false; // Default false. If true, don't attempt to satisfy_bounds or improve_solution
+    bool turn_on_research_code_adjust_for_sumeven = true;
+
+    // turn on or off some algorithm options to test output quality
+    bool use_HNF_always = false; // false then try rref solution first
+    bool use_HNF_goals = true;  // false c=1
+    bool use_map_nullspace = true; // false use M only during sum-even phase
+    bool use_best_improvement = true; // false use first improvement vector
+    
 
   protected: // data
     
@@ -393,7 +400,7 @@ namespace IIA_Internal
     // transform data to reduced row echelon form
     //   return true if sucessful
     //   two ways of selecting pivots: pick coeff 2 sum-even dummies for bounds, but not constraints
-    bool rref_constraints(vector<int> &rref_col_order); // for assigning dependent variables to satisfy constraints
+    bool rref_constraints(vector<int> &rref_col_order, bool map_only_phase); // for assigning dependent variables to satisfy constraints
     bool rref_improve    (vector<int> &rref_col_order); // for setting up nullspace to both satisfy bounds and improving quality
     
     // utility for rref
@@ -402,7 +409,7 @@ namespace IIA_Internal
     bool rref_elim(int &r, int rr, int c, vector<int> &rref_col_order, vector<int> &rref_col_map);
     // various priorities for choosing next row to call rref_elim
     bool rref_step0(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
-    bool rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
+    bool rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map, bool map_only_phase);
     bool rref_step2(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_stepZ(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
     bool rref_step_numrows(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map);
@@ -483,6 +490,10 @@ namespace IIA_Internal
                          vector<int>&cols_ind,
                          vector<int>&rows_dep);
     
+    // decide whether to round the solution of variable c up or down,
+    //   for a variable with a non-unity coefficient in its row such that any integer value will not make the row feasible.
+    //   based on bounds and goals
+    bool decide_roundup(int r, int c) const;
     // assign vars to their closest integer goal
     //   only assigns INT_VARs
     //   if overwrite is false, then only variables who's value is 0 (uninitialized) are assigned.
@@ -571,7 +582,7 @@ namespace IIA_Internal
     void assign_tied_variables();
     // checks if the variable is a tied-to variable, and uses the datum if so.
     // returns true if goal_lowest != goal_highest
-    bool compute_tied_goals(int c, double &goal_lowest, double &goal_highest) const;
+    bool get_tied_goals(int c, double &goal_lowest, double &goal_highest) const; 
     //== tied variables end
 
     // amount we need to change the intervals to make it satisfy its variable bounds.
@@ -623,9 +634,11 @@ namespace IIA_Internal
     bool is_improvement(QElement &s,
                         QElement &t,
                         SetValuesFn *constraint_fn,
-                        double constraint_threshold );
-    
-    void compute_quality_ratio(vector<QElement> &q, const vector<int> &cols);
+                        double constraint_threshold ) const;
+
+    // x > g ? x/g : g/x, but in a safe computation. c is column, the other values are retrieved
+    double get_R(int c, int &x, double &glo, double &ghi) const;
+    void compute_quality_ratio(vector<QElement> &q, const vector<int> &cols) const;
     
     // compare by lexicographic min max
     // return
@@ -644,18 +657,20 @@ namespace IIA_Internal
     void build_Q(priority_queue< QElement > &Q,
                  SetValuesFn &set_val_fn,
                  double threshold,
-                 const vector<int> &qcol);
+                 const vector<int> &qcol) const;
     
   protected:
     // priorities for selecting variables to change.
     friend class SetValuesFn;
     friend class SetValuesBounds;
     friend class SetValuesRatioR;
+    friend class SetValuesRatioG;
     friend class SetValuesRatio;
     friend class SetValuesOneCoeff;
     friend class SetValuesNumCoeff;
     friend class SetValuesNumCoeffV2;
     friend class SetValuesCoeffRowsGoal;
+    friend class SetValuesCoeffRGoal;
     friend class SetValuesTiny;
   };
   
