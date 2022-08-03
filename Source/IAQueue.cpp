@@ -153,7 +153,16 @@ namespace  IIA_Internal
       
       // if post>=pre, then we are already as good as we can get
       // the multiply is to favor the case of solution 3 over solution 2 for goal 1.
-      qe.valueA = pre>post ? (pre-post)*0.5 + 1 : 0.;
+      if (iia.use_fixed_RatioR_straddle)
+      {
+        qe.valueA = pre>post ? (pre-post)*0.5 + 1 : 0.;
+      }
+      else
+      {
+        // reintroduce old bug
+        // qe.valueA = pre-post+1; // 23/28
+        qe.valueA = pre-post; // 20/22
+      }
     }
     // a value less than 1 means the value would get worse than it is currently
     qe.valueB = -g; // prefer to change curves with small goals first, if ratios are equal

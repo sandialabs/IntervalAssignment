@@ -33,6 +33,15 @@ namespace IIA_Internal
   using std::lower_bound;
   using std::back_inserter;
 
+  // forward declarations of internal methods, for reference
+  int round_goal(double g); // return the value of x that minimizes R
+  int gcd(int u, int v);
+  int lcm(int u, int v);
+  void row_simplify_vals(vector<int> &v); // divide row vals by gcd
+  bool row_equal(const RowSparseInt &r, const RowSparseInt &s); // true if s = r or s = -r
+  // may want a method that determines if s = m*r for integer m != 1
+
+  // implementations
   int round_goal(double g)
   {
     const int lo = (int) g;
@@ -142,19 +151,70 @@ namespace IIA_Internal
     // return m;
   }
   
-  MatrixSparseInt::MatrixSparseInt(const MatrixSparseInt&M, int MaxMRow) : result(M.result)
+  bool row_equal(const RowSparseInt &r, const RowSparseInt &s)
   {
-    rows.reserve(MaxMRow);
-    copy(M.rows.begin(),M.rows.begin()+MaxMRow,back_inserter(rows));
+    // different number of non-zeros?
+    if (r.cols.size() != s.cols.size())
+      return false;
+    // both empty
+    if (r.cols.empty())
+      return true;
+    const bool is_negated = (r.vals[0] == -s.vals[0]);
+    for (int i = 0; i < (int) r.cols.size(); ++i)
+    {
+      // different variable column?
+      if (r.cols[i] != s.cols[i])
+        return false;
+      // different coeff?
+      if (( is_negated && r.vals[0] != -s.vals[0]) ||
+          (!is_negated && r.vals[0] !=  s.vals[0]))
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  MatrixSparseInt::MatrixSparseInt(const MatrixSparseInt&M, int MaxMrow) : result(M.result)
+  {
+    rows.reserve(MaxMrow);
+    copy(M.rows.begin(),M.rows.begin()+MaxMrow,back_inserter(rows));
     col_rows.resize(M.col_rows.size());
     fill_in_cols_from_rows();
   }
   
-  MatrixSparseInt::MatrixSparseInt(const MatrixSparseInt&M, int MaxMRow, const MatrixSparseInt&N) : result(M.result)
+  MatrixSparseInt::MatrixSparseInt(const MatrixSparseInt&M, int MaxMrow, const MatrixSparseInt&N, bool no_duplicate_rows) : result(M.result)
   {
-    rows.reserve(MaxMRow+N.rows.size());
+    rows.reserve(MaxMrow+N.rows.size());
     copy(N.rows.begin(),N.rows.end(),back_inserter(rows));
-    copy(M.rows.begin(),M.rows.begin()+MaxMRow,back_inserter(rows));
+    if (no_duplicate_rows && !N.rows.empty())
+    {
+      for (int r=0; r<MaxMrow; ++r)
+      {
+        // does row r of M exist in N?
+        auto &mrow = M.rows[r];
+        assert(!mrow.cols.empty());
+        int lead_col = mrow.cols[0];
+        // check rows in N with same leading col
+        bool found_duplicate_row = false;
+        for (int s : N.col_rows[lead_col])
+        {
+          if (row_equal(mrow, N.rows[s]))
+          {
+            found_duplicate_row = true;
+            break;
+          }
+        }
+        if (!found_duplicate_row)
+        {
+          rows.push_back(mrow);
+        }
+      }
+    }
+    else
+    {
+      copy(M.rows.begin(),M.rows.begin()+MaxMrow,back_inserter(rows));
+    }
     col_rows.resize(M.col_rows.size());
     fill_in_cols_from_rows();
   }
@@ -334,7 +394,7 @@ namespace IIA_Internal
           // decide whether to round up or down
           bool roundup = true;
           
-          if (turn_on_research_code_adjust_for_sumeven)
+          if (use_smart_adjust_for_fractions)
           {
             roundup = decide_roundup(r,c);
             result->info_message("IIA dependent var x%d = %d/%d != integer. Rounding %s.\n",
@@ -402,7 +462,7 @@ namespace IIA_Internal
         if (is_frac)
         {
           bool roundup = true;
-          if (turn_on_research_code_adjust_for_sumeven)
+          if (use_smart_adjust_for_fractions)
           {
             roundup = decide_roundup(r, c);
             result->info_message("constraint row %d not satisfied, dummy var %d rounded %s.\n",
@@ -1162,8 +1222,8 @@ namespace IIA_Internal
     //   unique for bounds, which are often one-sided, in contrast to "improve" where we must make tradeoffs
     //   this doesn't seem to help much, but it doesn't hurt
     
-    // zzyk, pick *best* unbounded row, not just the first we find
-    // to do: series of priority functions - no need for a queue, since we just use the best one then quit
+    // pick *best* unbounded row, not just the first we find
+    //   no need for a queue, since we just use the best one then quit
     //
     // if row's variable is below it's bound, increment by that row until the bound is met
     //   pick the best such row, the variable farthest from its lower bound
@@ -1948,12 +2008,10 @@ namespace IIA_Internal
     
     // COMMIT test suite fails/passes invariant to which of thsese two priority fn we use
     // The first one worked better for the mesh scaling IIA
-    // SetValuesRatioR priority_fn;  // based on current value+/-1
-    // const double priority_threshold=0.01;
-    // SetValuesRatio priority_fn;  // based on current value
-    // const double priority_threshold=1.;
-    SetValuesRatioG priority_fn;  // based on current value
-    const double priority_threshold=1.;
+    SetValuesRatioR priority_fn_RatioR;  // based on current value+/-1
+    const double priority_threshold_RatioR=0.01;
+    SetValuesRatioG priority_fn_RatioG;  // based on current value, except if optimal (close to goal G) don't select it
+    const double priority_threshold_RatioG=1.;
 
     SetValuesRatio quality_fn;
     const double quality_threshold=0;
@@ -1967,7 +2025,9 @@ namespace IIA_Internal
     // With a priority_queue, we have duplicates in the Q and spend too much time once we are stuck.
     
     // build Q
-    QWithReplacement Q(this,priority_fn,priority_threshold);
+    SetValuesFn *priority_fn =  use_Ratio_for_improvement_queue ? (SetValuesFn*) &priority_fn_RatioG : (SetValuesFn*) &priority_fn_RatioR;
+    double priority_threshold = use_Ratio_for_improvement_queue ?          priority_threshold_RatioG :          priority_threshold_RatioR;
+    QWithReplacement Q(this,*priority_fn,priority_threshold);
     // get all the columns, except the tied_variables
     vector<int>untied_int_vars;
     untied_int_vars.reserve(used_col+1);
@@ -2148,11 +2208,236 @@ namespace IIA_Internal
           }
           else
           {
+            auto old_num_rows=MN.rows.size();
+
+            // Add Nullspace to flip sign of blockers
+            // Find a nullspace combination that has the opposite sign for the blocking vars
+            if (use_Nullspace_sumeven_to_flip_sign_of_blocker && !Nullspace.rows.empty())
+            {
+              
+              if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+              {
+                result->info_message("\n\nTrying to %screment x%d\n", (t.dx>0 ? "in" : "de"), t.c);
+                result->info_message("By using a sum-even nullspace row to flip the sign of blocking coeff, for variables in blocking_cols\n");
+              }
+
+
+              int num_block=0;
+              // Should we just step over the rows of M instead of MN?
+              auto &tc_rows=MN.col_rows[t.c];
+              // figure out how to do the best one later
+              for (auto r : tc_rows)
+              {
+                const auto r_val = MN.rows[r].get_val(t.c);
+                const auto r_sign = (r_val > 0 ? 1 : -1) * t.dx; // sign after row is negated if needed to get sign == dx.
+                
+                if (smallest_self_block_coeff <= abs(r_val))
+                {
+                  // this row has a self-blocking coefficient, try some other row
+                  continue;
+                }
+                // check sign of tc_rows.coeff t.c
+                // find blockers
+                // typedef map<int, pair<int,int> > BlockingCols;
+                // copy row
+                RowSparseInt row(MN.rows[r]); // copy
+                const bool negate_row_r = ((r_val>0) != t.dx>0);
+                if (negate_row_r)
+                {
+                  row.multiply(-1);
+                }
+                // row has the right sign for t.c so that we would add the row to improve solution[t.c]
+                
+                if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                {
+                  result->info_message("Initial MN row %d, with %s sign, ", r, (negate_row_r ? "flipped" : "original"));
+                  row.print_row(result);
+                  result->info_message("Current blocking_cols ");
+                  print_map(blocking_cols);
+                }
+
+                bool try_row = true;
+                bool progress = false;
+                for (auto &blocking_col : blocking_cols)
+                {
+                  
+                  // 1. see if row has blocking col with coefficient +/-1, compare to sign of blocking_cols i.e. first and second
+                  // 2. if so search Nullspace for a vector with a "2" coeff for that blocker
+                  // to do: figure out what to do if it changes the coeff of other blockers
+                  //   add it to copy
+                  //   see if it works
+                  //   if not, does it also block with coeff +1? then we need to eliminate it.
+                  //     otherwise, some other blocker has a bad coeff. That's the one we need to eliminate, not this one.
+
+                  // 1.
+                  int bc = blocking_col.first;
+                  
+                  auto bc_val = row.get_val(bc);
+                  if (bc_val == 0)
+                  {
+                    continue; // blocker not in row, we're already good wrt this variable
+                  }
+                  if (abs(bc_val) % 2==0) // coefficient is even
+                  {
+                    // to do, indicate we want to add to make the coefficient zero
+                    // or just deal with this during the Gaussian elimination phase
+                    try_row = false;
+                    continue;
+                  }
+                  // to do, generalize to look for any combo of 1 and 2 coefficients
+                  // for now, just work on the coeff == 1 case
+                  // e.g. we could also try to fix bc_val = -3, etc
+                  if ( abs(bc_val)!=1 )
+                  {
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message("Only bc_val == 1 or -1 is implemented currently. bc_val %d unsupported, skipping\n",bc_val);
+                    }
+                    try_row = false;
+                    continue;
+                  }
+
+                  int bc_r_sign = bc_val > 0 ? 1 : -1;
+                  auto block_neg = blocking_col.second.first;
+                  auto block_pos = blocking_col.second.second;
+                  // blocked in both directions? give up on r
+                  if (block_neg == -1 && block_pos == 1)
+                  {
+                    // row has a blocker that we must eliminate for any chance of success
+                    try_row = false;
+                    // but keep trying to flip the sign of other blockers, so elimination will work on row
+                    continue;
+                  }
+
+                  // do we want to add (true) or subtract (false) 2*nullspacerow to row?
+                  try_row = true;
+                  bool want_add_two = true;
+                  if (block_neg == bc_r_sign)
+                  {
+                    want_add_two = true;
+                  }
+                  else if (block_pos == bc_r_sign)
+                  {
+                    want_add_two = false; // want to subtract 2
+                  }
+                  else
+                  {
+                    // block_pos or neg magnitude is greater than 1
+                    // OK to try row without doing anything to this bc in row
+                    continue;
+                  }
+                  
+                  // 2.
+                  // check rows in nullspace containing variable bc
+                  assert(try_row);
+                  try_row = false;
+                  const auto &bc_rows = Nullspace.col_rows[bc];
+                  for (int rN : bc_rows)
+                  {
+
+                    auto &Nrow = Nullspace.rows[rN];
+                    int rN_bc_val = Nrow.get_val(bc);
+                    // want a 2 for the blocking col, and a zero for t.c
+                    if ( abs(rN_bc_val) != 2 || Nrow.get_val(t.c)!=0)
+                    {
+                      continue; // try the next row
+                    }
+                    bool rN_bc_pos = (rN_bc_val>0);
+                    int mult = (want_add_two == rN_bc_pos) ? 1 : -1;
+
+                    // debug
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message("Flipping sign of blocking col %dx%d in ", bc_val, bc);
+                      row.print_row(result);
+                      result->info_message(" by adding %d times ", mult);
+                      Nrow.print_row(result);
+                    }
+                    
+                    Nullspace.row_r_add_ms(row, mult, Nrow);
+                    // to do
+                    // Research
+                    //   adding Nrow can make row worse, by adding more blocking cols, or making their coefficients worse
+                    //   need a strategy for evaluating if it is worse and going back to original row if things are bad,
+                    //   try various combinations of rows, etc.
+                    //   could be complicated
+                    
+                    
+                    // debug
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message(" to get ");
+                      row.print_row(result);
+                      result->info_message("\n");
+                    }
+
+                    // did it work?
+                    const auto new_bc_val = row.get_val(bc);
+                    if (new_bc_val>0)
+                    {
+                      assert(new_bc_val < block_pos);
+                    }
+                    else
+                    {
+                      assert(new_bc_val > block_neg);
+                    }
+                    assert( row.get_val(bc) == -bc_r_sign );
+                    try_row = true;
+                    break;
+                  }
+                  if (!try_row)
+                  {
+                    break;
+                  }
+                } // for blocking_col
+
+                if (try_row)
+                {
+                  result->info_message("Trying ");
+                  row.print_row(result);
+
+                  // try to improve solution using row
+                  bool self_block = false;
+                  int self_block_coeff = 0;
+                  const bool worked = accept_strict_improvement(Q,
+                                                                quality_fn, quality_threshold,
+                                                                &constraint_fn, constraint_threshold,
+                                                                t.c, row, dx,
+                                                                self_block, self_block_coeff, blocking_cols, num_block, improved_cols);
+                  if (worked)
+                  {
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message("debug_Nullspace_sumeven_to_flip_sign_of_blocker worked :-O\n\n");
+                    }
+                    fixed = true;
+                    break;
+                  }
+                  else
+                  {
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message("failed, I'll try another row if any :-(\n\n");
+                    }
+                  }
+                }
+                
+              } // for r
+              if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+              {
+                result->info_message("Moving on.\n\n");
+              }
+
+            }
+            
+            
+            
+            // Gaussian elim approach
+            if (!fixed)
+            {
             // Find a nullspace combination that doesn't have the blocking vars in them (either plus or minus)
             // try up to M.rows.size() times, since that's as many variables as we can eliminate
             // int max_tries = M.rows.size();
-            auto old_num_rows=MN.rows.size();
-            
             do
             {
               int unblocked_row=-1;
@@ -2234,6 +2519,7 @@ namespace IIA_Internal
                 give_up=true;
               }
             } while (!fixed && !give_up);
+            }
             
             if (!fixed)
             {
@@ -2425,6 +2711,7 @@ namespace IIA_Internal
     
   }
   
+  
   double IncrementalIntervalAssignment::get_R(int c, int &x, double &glo, double &ghi) const
   {
     get_tied_goals(c,glo,ghi);
@@ -2436,18 +2723,25 @@ namespace IIA_Internal
     }
     else
     {
-      if (x<glo)
+      if (x<=0)
       {
-        return (x>0 ? ghi/x : 1000.*ghi*(abs(x)+1.)); // safe ghi/x
+        const auto R1lo = glo<1 ? 1/glo : glo;
+        const auto R1hi = ghi<1 ? 1/ghi : ghi;
+        const auto R1 = std::max(R1lo,R1hi);
+        return 1000.*(2-x)*R1;
+      }
+      if (x<=glo)
+      {
+        return ghi/x; // >= glo/x
       }
       else if (x>=ghi)
       {
-        return x/glo;
+        return x/glo; // >= x/glo
       }
       // glo < x < ghi
       else
       {
-        return std::max( x / glo, (x>0 ? ghi/x : 1000.*ghi*(abs(x)+1.)) );
+        return std::max( x/glo, ghi/x );
       }
     }
   }
@@ -3733,7 +4027,7 @@ namespace IIA_Internal
     SetValuesCoeffRowsGoal val_CoeffRowsGoal_Q; // map_only_phase
     SetValuesCoeffRGoal val_CoeffRGoal_Q; // even phase
     QWithReplacement Q(this, val_CoeffRowsGoal_Q, numeric_limits<double>::lowest()/4);
-    if (!map_only_phase)
+    if (use_better_rref_step1_pivots_in_sumeven_phase && !map_only_phase) // zzyk, test doing this in the map_only_phase as well
     {
       Q.set_val_fn(val_CoeffRGoal_Q);
     }
@@ -5588,30 +5882,6 @@ namespace IIA_Internal
     return L;
   }
 
-  bool row_equal(const RowSparseInt &r, const RowSparseInt &s)
-  {
-    // different number of non-zeros?
-    if (r.cols.size() != s.cols.size())
-      return false;
-    // both empty
-    if (r.cols.empty())
-      return true;
-    const bool is_negated = (r.vals[0] == -s.vals[0]);
-    for (int i = 0; i < (int) r.cols.size(); ++i)
-    {
-      // different variable column?
-      if (r.cols[i] != s.cols[i])
-        return false;
-      // different coeff?
-      if (( is_negated && r.vals[0] != -s.vals[0]) ||
-          (!is_negated && r.vals[0] !=  s.vals[0]))
-      {
-        return false;
-      }
-    }
-    return true;
-  }
-
   void remove_duplicate_rows(const MatrixSparseInt &M, int MaxMrow, MatrixSparseInt &N)
   {
     set<int> delete_row;
@@ -5812,7 +6082,7 @@ namespace IIA_Internal
     // rows 0..MaxMrow span the nullspace, and beyond that are extra rows that were useful candidate increment vectors
     MatrixSparseInt M(result);
     int MaxMrow=0;
-    // MaxMRow is last row of nullspace M before we augmented it
+    // MaxMrow is last row of nullspace M before we augmented it
     // to prepend Nullspace to M, use the following two lines
     //   MatrixSparseInt &M = Nullspace;
     //   int MaxMrow=(int) M.rows.size(); // last row of nullspace M before we augmented it
@@ -5845,12 +6115,6 @@ namespace IIA_Internal
       create_nullspace(cols_dep, cols_ind, rows_dep, M, MaxMrow);
       cull_nullspace_tied_variable_rows(M, MaxMrow);
       
-      // remove rows of Nullspace that appear in M
-      if (use_map_nullspace)
-      {
-        remove_duplicate_rows(M, MaxMrow, Nullspace);
-      }
-      
       // debug
       if (result->log_debug) // || use_map_nullspace)
       {
@@ -5872,8 +6136,9 @@ namespace IIA_Internal
       }
     }
     
-    // concatenate M+N
-    MatrixSparseInt MN(M,MaxMrow,Nullspace);
+    // MN = concatenate M+Nullspace
+    //   if use_map_nullspace is false, then Nullspace is an empty matrix here and MN==M
+    MatrixSparseInt MN(M,MaxMrow,Nullspace,true);
     if (result->log_debug && use_map_nullspace)
     {
       MN.print_matrix("MN nullspace");
@@ -5909,7 +6174,9 @@ namespace IIA_Internal
         }
       }
       if (more_nullspace_rows)
+      {
         in_bounds = satisfy_bounds(Mtiny, MN);
+      }
     }
     
     // debug
@@ -6282,7 +6549,7 @@ namespace IIA_Internal
     result->debug_message("Solving IIA mapping subproblems.\n");
     
     bool success = solve_phase(true, do_improve, new_row_min, new_row_max);
-    if (0 && turn_on_research_code_adjust_for_sumeven)
+    if (0)
     {
       print_solution_summary("solution after mapping phase");
     }
@@ -6723,6 +6990,15 @@ namespace IIA_Internal
       print_problem("\nEntire Interval Problem");
     }
     
+    // hack for test_problem_augmented_nullspace_demo zzyk
+    if (0 && !map_only_phase)
+    {
+      col_solution[0]=4;
+      col_solution[1]=4;
+      col_solution[2]=4;
+      col_solution[3]=5;
+    }
+
     // subdivide problems into independent components
     vector<IncrementalIntervalAssignment*> sub_problems;
     vector<int> orphan_cols;

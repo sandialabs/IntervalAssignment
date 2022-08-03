@@ -250,6 +250,34 @@ void shuffle_solution(IIA::IA &ia, std::vector<int> &expected_solution, const st
   expected_solution.swap(new_solution);
 }
 
+void test_problem_augmented_nullspace_demo()
+{
+  std::cout << "test_problem_augmented_nullspace_demo  start: ";
+
+  IIA::IA ia;
+  setup_io(ia.get_result());
+  ia.get_result()->log_info=true;
+  ia.get_result()->log_debug=true;
+  
+  ia.resize(1,4);
+  std::vector<int> cols = {0, 1, 2, 3};
+  std::vector<int> vals = {-1, -1, -1, 2}; // 3 curves in one pave sum-even constraint
+  ia.set_rhs(0,0);
+  ia.set_row(0,cols,vals);
+  const int g=3;
+  ia.set_goal(0,g);
+  ia.set_goal(1,g);
+  ia.set_goal(2,g);
+  ia.set_no_goal(3);
+  ia.solve();
+  
+  test_result(ia);
+  std::vector<int> expected_solution = {g+1,g,g, (3*g+1) / 2}; // constraints-only solution ??
+                                                // std::vector<int> expected_solution = {g+1,g-1}; // optimal solution
+  test_solution(ia,expected_solution);
+  std::cout << "test_problem_augmented_nullspace_demo  end." << std::endl;
+}
+
 void test_problem_HNF_A()
 {
   // test solving a single equality constraint, with large goals, to see if HNF can get it right
@@ -282,7 +310,7 @@ void test_problem_HNF_A()
   // std::vector<int> expected_solution = {g+1,g-1}; // optimal solution
   test_solution(ia,expected_solution);
   
-  std::cout << "test_problem_A  end." << std::endl;
+  std::cout << "test_problem_HNF_A  end." << std::endl;
 }
 
 
@@ -1472,6 +1500,8 @@ int main(int argc, const char * argv[])
 //  std::cout << "main time used " << time_used << std::endl;
 //
   // return 0;
+  
+  // test_problem_augmented_nullspace_demo(); return 0;
   
   iia_cubit_autotest(); return 0;
   

@@ -63,10 +63,10 @@ namespace IIA_Internal
 
     // constructor
     MatrixSparseInt(IAResultImplementation *result_ptr) : result(result_ptr){}
-    // copy constructor, copies up to row MaxMRow
-    MatrixSparseInt(const MatrixSparseInt&M, int MaxMRow);
-    // copy constructor, concatenate M[1:MaxMRow,:] and N
-    MatrixSparseInt(const MatrixSparseInt&M, int MaxMRow, const MatrixSparseInt&N);
+    // copy constructor, copies up to row MaxMrow
+    MatrixSparseInt(const MatrixSparseInt&M, int MaxMrow);
+    // copy constructor, concatenate M[1:MaxMrow,:] and N
+    MatrixSparseInt(const MatrixSparseInt&M, int MaxMrow, const MatrixSparseInt&N, bool no_duplicate_rows);
 
     const IAResultImplementation *get_result() const {return result;}
 
@@ -80,6 +80,13 @@ namespace IIA_Internal
     void print_matrix_summary(string prefix=string()) const;
     void print_matrix(string prefix=string()) const;
     
+    // r += m*s
+    // conceptually static: "this" unchanged, only used for "workspace"
+    void row_r_add_ms(RowSparseInt &r, int m, const RowSparseInt &s )
+    {
+      matrix_row_us_minus_vr( s, r, -1, nullptr, 1, -m);
+    }
+
     // s = u*s - v*r
     void matrix_row_us_minus_vr(int r, int s, int u, int v) { matrix_row_us_minus_vr(rows[r], rows[s], s, &col_rows, u, v); }
     // s = u*s - v*r, with u and v chosen so that s[c]==0, for all rows s containing c except r
@@ -288,16 +295,21 @@ namespace IIA_Internal
     void print() const;
     
     // research options
-    bool turn_on_pave_research_code = true; // Default true. If true, then copy mapping nullspace to create local/intuitive paving nullspace vectors.
-    bool satisfy_constraints_only = false; // Default false. If true, don't attempt to satisfy_bounds or improve_solution
-    bool turn_on_research_code_adjust_for_sumeven = true;
+    bool satisfy_constraints_only = false; // Default false. If true, don't attempt to satisfy_bounds or improve_solution. For debugging.
+    const bool turn_on_pave_research_code = true; // Default true. If true, then copy mapping nullspace to create local/intuitive paving nullspace vectors.
 
     // turn on or off some algorithm options to test output quality
     bool use_HNF_always = false; // false then try rref solution first
     bool use_HNF_goals = true;  // false c=1
     bool use_map_nullspace = true; // false use M only during sum-even phase
     bool use_best_improvement = true; // false use first improvement vector
-    
+
+    bool use_better_rref_step1_pivots_in_sumeven_phase = true; // Default true. If false, use the same pivot rules as in the mapping phase
+    bool use_fixed_RatioR_straddle = true; // Default true. If false, reintroduce a bug for calculating RatioR for solutions less than 1 away from goals.
+    bool use_smart_adjust_for_fractions = true; // Default true. If false, then we always round upwards
+    bool use_Ratio_for_improvement_queue = true; // Default true. If false, then use RatioR for selecting which variable
+    bool use_Nullspace_sumeven_to_flip_sign_of_blocker = true; // Default true. If true, then when trying to increase x0, if "x0 - x1" is blocked by x1, then add a "2x1 + y" Nullspace row to flip the sign of x1
+    bool debug_Nullspace_sumeven_to_flip_sign_of_blocker = false; // output debugging print statements
 
   protected: // data
     
