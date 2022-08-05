@@ -397,7 +397,7 @@ namespace IIA_Internal
           if (use_smart_adjust_for_fractions)
           {
             roundup = decide_roundup(r,c);
-            result->info_message("IIA dependent var x%d = %d/%d != integer. Rounding %s.\n",
+            result->debug_message("IIA dependent var x%d = %d/%d != integer. Rounding %s.\n",
                                  c, -sum, coeff, roundup ? "up" : "down");
           }
           
@@ -465,7 +465,7 @@ namespace IIA_Internal
           if (use_smart_adjust_for_fractions)
           {
             roundup = decide_roundup(r, c);
-            result->info_message("constraint row %d not satisfied, dummy var %d rounded %s.\n",
+            result->debug_message("constraint row %d not satisfied, dummy var %d rounded %s.\n",
                                  r, c, roundup ? "up" : "down");
           }
           if (roundup)
@@ -2393,8 +2393,11 @@ namespace IIA_Internal
 
                 if (try_row)
                 {
-                  result->info_message("Trying ");
-                  row.print_row(result);
+                  if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                  {
+                    result->info_message("Trying ");
+                    row.print_row(result);
+                  }
 
                   // try to improve solution using row
                   bool self_block = false;
@@ -6479,11 +6482,18 @@ namespace IIA_Internal
     // debug
     result->info_message("Running incremental interval assignment.\n");
     // what options were turned on
-    result->info_message("use HNF_always, HNF_goals, map_nullspace, best_improvement = %d%d%d%d\n",
+    result->info_message("use HNF_always, HNF_goals, map_nullspace, best_improvement, better_rref_pivots, fixed_RatioR, "
+                         "smart_rounding, Ratio_for_improvement, flip_blocker_signs"
+                         " = %d%d%d%d%d%d%d%d%d\n",
                          use_HNF_always,
                          use_HNF_goals,
                          use_map_nullspace,
-                         use_best_improvement);
+                         use_best_improvement,
+                         use_better_rref_step1_pivots_in_sumeven_phase,
+                         use_fixed_RatioR_straddle,
+                         use_smart_adjust_for_fractions,
+                         use_Ratio_for_improvement_queue,
+                         use_Nullspace_sumeven_to_flip_sign_of_blocker);
     
     CpuTimer total_timer;
     double setup_time=0, map_time(0.);
@@ -8121,5 +8131,39 @@ namespace IIA_Internal
     result->log_debug=old_debug;
     return rc;
   }
-  
+
+  // zzyk, hack put this here for fast recompile
+  IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr), Nullspace(result_ptr)
+  {
+    // all on
+    if (0)
+    {
+      use_HNF_always = false; // false then try rref solution first
+      use_HNF_goals = true;  // false c=1
+      use_map_nullspace = true; // false use M only during sum-even phase
+      use_best_improvement = true; // false use first improvement vector
+      
+      use_better_rref_step1_pivots_in_sumeven_phase = true; // Default true. If false, use the same pivot rules as in the mapping phase
+      use_fixed_RatioR_straddle = true; // Default true. If false, reintroduce a bug for calculating RatioR for solutions less than 1 away from goals.
+      use_smart_adjust_for_fractions = true; // Default true. If false, then we always round upwards
+      use_Ratio_for_improvement_queue = true; // Default true. If false, then use RatioR for selecting which variable
+      use_Nullspace_sumeven_to_flip_sign_of_blocker = true; // Default true. If true, then when trying to increase x0, if "x0 - x1" is blocked by x1, then add a "2x1 + y" Nullspace row to flip the sign of x1
+    }
+
+    // all off
+    if (1)
+    {
+      use_HNF_always = false; // false then try rref solution first
+      use_HNF_goals = false;  // false c=1
+      use_map_nullspace = false; // false use M only during sum-even phase
+      use_best_improvement = false; // false use first improvement vector
+      
+      use_better_rref_step1_pivots_in_sumeven_phase = false; // Default true. If false, use the same pivot rules as in the mapping phase
+      use_fixed_RatioR_straddle = false; // Default true. If false, reintroduce a bug for calculating RatioR for solutions less than 1 away from goals.
+      use_smart_adjust_for_fractions = false; // Default true. If false, then we always round upwards
+      use_Ratio_for_improvement_queue = false; // Default true. If false, then use RatioR for selecting which variable
+      use_Nullspace_sumeven_to_flip_sign_of_blocker = false; // Default true. If true, then when trying to increase x0, if "x0 - x1" is blocked by x1, then add a "2x1 + y" Nullspace row to flip the sign of x1
+    }
+  }
+
 } // namespace

@@ -686,10 +686,10 @@ namespace IIA_Internal
     friend class SetValuesTiny;
   };
   
-  inline
-  IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr), Nullspace(result_ptr)
-  {
-  }
+//  inline
+//  IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr), Nullspace(result_ptr)
+//  {
+//  }
   
   inline
   int IncrementalIntervalAssignment::get_B( int row ) const
