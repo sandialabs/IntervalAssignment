@@ -231,18 +231,26 @@ namespace  IIA_Internal
       return;
     }
     
-    int x_int = qe.solution;
-    double x = (double) x_int;
-    if (x<g)
+    const int x_int = qe.solution;
+    const double x = (double) x_int;
+    
+    if (x<=0)
     {
-      qe.valueA = (x>1e-2 ? g/x : 1000.*g*(abs(x)+1.));
+      const auto R1 = (g<1 ? 1/g : g);
+      qe.valueA = 1000.*(2-x_int)*R1;
       qe.dx = 1; // want increment
     }
-    else
+    else if (x<g)
     {
-      qe.valueA = x/g; // scaling away from zero is done within set_goal now. (g>1e-2 ? x/g : 1000*x*(abs(g)+1.));
+      qe.valueA = g/x;
+      qe.dx = 1; // want increment
+    }
+    else // (x>=g)
+    {
+      qe.valueA = x/g;
       qe.dx = -1; // desire decrement
     }
+
     qe.valueB = -g;  // prefer to change curves with small goals first
     qe.valueC = 0.;
     
