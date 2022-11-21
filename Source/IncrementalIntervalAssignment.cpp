@@ -8136,7 +8136,7 @@ namespace IIA_Internal
   IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr), Nullspace(result_ptr)
   {
     // all on
-    if (0)
+    if (1)
     {
       use_HNF_always = false; // false then try rref solution first
       use_HNF_goals = true;  // false c=1
@@ -8151,7 +8151,7 @@ namespace IIA_Internal
     }
 
     // all off
-    if (1)
+    if (0)
     {
       use_HNF_always = false; // false then try rref solution first
       use_HNF_goals = false;  // false c=1

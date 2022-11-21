@@ -5,8 +5,9 @@
 #include "CpuTimer.h"
 #include <iostream>
 
-// #include "iia-cubit-autotest-scale-cren.h"
-#include "iia-cubit-autotest-alltests.cpp"
+#include "iia-cubit-autotest-scale-cren.h"
+// #include "iia-cubit-autotest-alltests.cpp"
+// #include "iia-cubit-autotest-alltests-rebase-19march2020.cpp"
 // #include "iia-cubit-autotest-onetest.cpp"
 // void iia_cubit_autotest() {}
 // void iia_cubit_test_problem_scale_cren_AA();
