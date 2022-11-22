@@ -13,7 +13,6 @@
 		D243C81923EE47F000F3C7BF /* IAResultImplementation.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */; };
 		D243C81B23F5FEB700F3C7BF /* test.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D243C81A23F5FEB600F3C7BF /* test.cpp */; };
 		D2B6599123FCEA29009EBEAE /* IAQueue.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D2B6599023FCEA29009EBEAE /* IAQueue.cpp */; };
-		D2E0AD7A2600779E00141301 /* iia-cubit-autotest-alltests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D2E0AD792600779E00141301 /* iia-cubit-autotest-alltests.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -44,7 +43,6 @@
 		D243C81A23F5FEB600F3C7BF /* test.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = test.cpp; path = ../Source/test.cpp; sourceTree = SOURCE_ROOT; };
 		D2B6598F23FCE916009EBEAE /* IAQueue.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = IAQueue.h; path = ../Source/IAQueue.h; sourceTree = "<group>"; };
 		D2B6599023FCEA29009EBEAE /* IAQueue.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = IAQueue.cpp; path = /Users/samitch/Documents/repos/IntervalAssignment/Source/IAQueue.cpp; sourceTree = "<absolute>"; };
-		D2E0AD792600779E00141301 /* iia-cubit-autotest-alltests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = "iia-cubit-autotest-alltests.cpp"; path = "../../Source/iia-cubit-autotest-alltests.cpp"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -77,7 +75,6 @@
 		D243C7FD23EB929800F3C7BF /* IntervalAssignment-xcode */ = {
 			isa = PBXGroup;
 			children = (
-				D2E0AD792600779E00141301 /* iia-cubit-autotest-alltests.cpp */,
 				D2B6599023FCEA29009EBEAE /* IAQueue.cpp */,
 				D2B6598F23FCE916009EBEAE /* IAQueue.h */,
 				D243C81723EE47EF00F3C7BF /* IAResultImplementation.cpp */,
@@ -158,7 +155,6 @@
 				D243C81923EE47F000F3C7BF /* IAResultImplementation.cpp in Sources */,
 				D243C81B23F5FEB700F3C7BF /* test.cpp in Sources */,
 				D2B6599123FCEA29009EBEAE /* IAQueue.cpp in Sources */,
-				D2E0AD7A2600779E00141301 /* iia-cubit-autotest-alltests.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

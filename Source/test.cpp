@@ -5,7 +5,7 @@
 #include "CpuTimer.h"
 #include <iostream>
 
-#include "iia-cubit-autotest-scale-cren.h"
+// #include "iia-cubit-autotest-scale-cren.h"
 // #include "iia-cubit-autotest-alltests.cpp"
 // #include "iia-cubit-autotest-alltests-rebase-19march2020.cpp"
 // #include "iia-cubit-autotest-onetest.cpp"
@@ -1504,7 +1504,7 @@ int main(int argc, const char * argv[])
   
   // test_problem_augmented_nullspace_demo(); return 0;
   
-  iia_cubit_autotest(); return 0;
+  // iia_cubit_autotest(); return 0;
   
   // tests where use_map_nullspace might make a difference
   // test_problem_C();

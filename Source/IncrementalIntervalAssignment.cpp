@@ -2229,7 +2229,7 @@ namespace IIA_Internal
               for (auto r : tc_rows)
               {
                 const auto r_val = MN.rows[r].get_val(t.c);
-                const auto r_sign = (r_val > 0 ? 1 : -1) * t.dx; // sign after row is negated if needed to get sign == dx.
+                // const auto r_sign = (r_val > 0 ? 1 : -1) * t.dx; // sign after row is negated if needed to get sign == dx.
                 
                 if (smallest_self_block_coeff <= abs(r_val))
                 {
@@ -2257,7 +2257,7 @@ namespace IIA_Internal
                 }
 
                 bool try_row = true;
-                bool progress = false;
+                // bool progress = false;
                 for (auto &blocking_col : blocking_cols)
                 {
                   
@@ -6559,7 +6559,7 @@ namespace IIA_Internal
     result->debug_message("Solving IIA mapping subproblems.\n");
     
     bool success = solve_phase(true, do_improve, new_row_min, new_row_max);
-    if (0)
+      if (/* DISABLES CODE */ (0))
     {
       print_solution_summary("solution after mapping phase");
     }
@@ -7001,7 +7001,7 @@ namespace IIA_Internal
     }
     
     // hack for test_problem_augmented_nullspace_demo zzyk
-    if (0 && !map_only_phase)
+      if (/* DISABLES CODE */ (0) && !map_only_phase)
     {
       col_solution[0]=4;
       col_solution[1]=4;
@@ -8151,7 +8151,7 @@ namespace IIA_Internal
     }
 
     // all off
-    if (0)
+    if (/* DISABLES CODE */ (0))
     {
       use_HNF_always = false; // false then try rref solution first
       use_HNF_goals = false;  // false c=1
