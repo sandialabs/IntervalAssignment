@@ -46,7 +46,7 @@ The driver code test.cpp gives examples of setting up and solving the problem.
 == Versions / Branches
 
 master 
-branch contains the version for the 2022-2023 CAD Journal [IIA-journal]
+branch contains the version for the 2022-2023 CAD Journal [IIA-journal], that commit tagged as "research-pave"
 this is the version with the best output and runtime
 
 imr2021
