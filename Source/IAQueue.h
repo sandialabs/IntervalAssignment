@@ -119,6 +119,7 @@ namespace IIA_Internal
   
   // ratio  current/goal     for current>goal
   //           goal/current  for goal>current
+  // see IncrementalIntervalAssignment::get_R
   class SetValuesRatio: public SetValuesFn
   {
   public:
@@ -127,7 +128,19 @@ namespace IIA_Internal
     void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
     void set_values_goal(const IncrementalIntervalAssignment &iia, double g, QElement &qe );
   };
-  
+
+  // ratio  current/goal     for current>goal
+  //           goal/current  for goal>current
+  // if incremented value would be worse, then set valueA to zero
+  class SetValuesRatioG: public SetValuesFn
+  {
+  public:
+    SetValuesRatioG() {}
+  public:
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
+    void set_values_goal(const IncrementalIntervalAssignment &iia, double g, QElement &qe );
+  };
+
   // how far out-of-bounds is the variable value
   class SetValuesBounds: public SetValuesFn
   {
@@ -166,6 +179,16 @@ namespace IIA_Internal
     void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
   };
 
+  // pick column to eliminate in rref, that has a small coeff, has big R, large goal
+  class SetValuesCoeffRGoal: public SetValuesFn
+  {
+  public:
+    SetValuesCoeffRGoal() {}
+  public:
+    void set_values_implementation(const IncrementalIntervalAssignment &iia, QElement &qe ) override;
+  };
+  
+  
   // pick column to eliminate in rref, that has a small coeff, is in few rows, rows are short, and is long
   class SetValuesTiny: public SetValuesFn
   {
@@ -177,9 +200,6 @@ namespace IIA_Internal
   private:
     vector <int> workspace;
   };
-
-  // true if A<B by lexicographic min max
-  bool is_better( vector<QElement> &qA, vector<QElement> &qB);
   
   // like a priority queue but you can update the priority of an element higher or lower. Based on set sorting.
   class QWithReplacement
@@ -188,6 +208,8 @@ namespace IIA_Internal
     
     QWithReplacement(const IncrementalIntervalAssignment *iia_in, SetValuesFn &f, double f_threshold)
     : val_fn(&f), threshold(f_threshold), iia(iia_in) {}
+
+    void set_val_fn(SetValuesFn &f) {val_fn = &f;}
     
     void build(const vector<int> &cols);
     
