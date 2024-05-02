@@ -4,6 +4,7 @@
 #include "IAResultImplementation.h"
 #include "CpuTimer.h"
 #include <iostream>
+#include <assert.h>
 
 // #include "iia-cubit-autotest-scale-cren.h"
 // #include "iia-cubit-autotest-alltests.cpp"
@@ -1504,14 +1505,10 @@ namespace IIA_Internal
 
 int main(int argc, const char * argv[])
 {
- 
-  // test_problem_HNF_A(); return 0;
-  
-<<<<<<< HEAD
+   
   // test io
   test_io();
   
-=======
   // iia_cubit_test_problem_1583197819390(); return 0;
   // iia_cubit_test_problem_1583198028742(); return 0;
   
@@ -1539,8 +1536,8 @@ int main(int argc, const char * argv[])
   // test_problem_even_A();
   // return 0;
 
->>>>>>> b4d7b342bd65ca5f7baf7b12edc3a26c4ca4b33a
   // test Reduce Row Echelon RREF and Hermite Normal Form HNF matrix routines
+  // test_problem_HNF_A(); return 0;
   using IIA_Internal::IIATester;
   IIATester::test_problem0();
   IIATester::test_problem1();
