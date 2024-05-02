@@ -179,7 +179,6 @@ void test_solution_autogen(IIA::IA &ia, std::vector<int> expected_solution, int 
 void test_solution_autogen(IIA::IA &ia, std::vector<int> expected_solution)
 {
   return test_solution_autogen(ia, expected_solution, 1);
->>>>>>> 102e6a32df728332592cf1864d2867df9cecf6e8
 }
 
 void test_result(IIA::IA &ia)
