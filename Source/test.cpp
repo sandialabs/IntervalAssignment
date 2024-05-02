@@ -772,7 +772,7 @@ namespace IIA_Internal
   {
     // test putting the matrix into rref form, choosing pivots in the context of setting up to solve constraints.
     std::vector<int> rref_col_order;
-    bool rref_OK = rref_constraints(rref_col_order);
+    bool rref_OK = rref_constraints(rref_col_order, true);
     if (!rref_OK)
     {
       std::cout << "ERROR: Failed to put matrix into RREF form for constraints!\n";
@@ -818,15 +818,17 @@ namespace IIA_Internal
   
   bool IIATester::test_hnf_solver(std::vector<int> &expected_solution, std::vector<int> *nullspace_vector, bool expect_fail)
   {
+    // set goals equal to expected solution
+    vector<int> goals(expected_solution);
     IIA_Internal::MatrixSparseInt B(result), U(result);
     std::vector<int> hnf_col_order;
-    auto OK = HNF(B,U,hnf_col_order);
+    auto OK = HNF(B,U,hnf_col_order,goals);
     if (!OK)
     {
       std::cout << "ERROR: HNF failed\n";
       return false;
     }
-    OK = HNF_satisfy_constraints(B,U,hnf_col_order);
+    OK = HNF_satisfy_constraints(B,U,hnf_col_order,goals);
     if (!OK)
     {
       if (!expect_fail)
