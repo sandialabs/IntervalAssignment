@@ -3,6 +3,7 @@
 #include "IncrementalIntervalAssignment.h"
 #include "IAResultImplementation.h"
 #include <iostream>
+#include <assert.h>
 
 // void iia_cubit_autotest();
 
@@ -21,6 +22,16 @@
 // triangle primitive mixed with other constraints
 // some infeasible prolems, like the slanted L
 // u sub-map, dynamic constraints
+
+void setup_io(const IIA::IAResult *result)
+{
+  result->message_log = &std::cout;
+  result->log_info = true;
+  result->log_warning = true;
+  result->log_error = true;
+  result->log_debug = false;
+  result->log_debug_time = false; // true;
+}
 
 void test_io()
 {
@@ -45,13 +56,130 @@ void test_io()
   std::cout << "test_io end.\n";
 }
 
-void setup_io(const IIA::IAResult *result)
+// SetValuesRatio::set_values_goal
+double f(int x_int, double g, int &dx)
 {
-  result->message_log = &std::cout;
-  result->log_info = false;
-  result->log_warning = true;
-  result->log_error = true;
-  result->log_debug = false;
+  if (g==0)
+    return 0;
+  
+  double ff=0.;
+  const double x = (double) x_int;
+  if (x<g)
+  {
+    ff = (x>1e-2 ? g/x : 1000.*g*(abs((int)x)+1.));
+    dx = 1;
+  }
+  else
+  {
+    ff = x/g;
+    dx = -1;
+  }
+  return ff;
+}
+
+void test_solution_autogen(IIA::IA &ia, std::vector<int> expected_solution, int dx)
+{
+  int mine_better = ia.solution_is_better_than_Y( expected_solution, true, false );
+  if (mine_better==1)
+  {
+    std::cout << "Current solution is better than old solution :-)\n";
+  }
+  else if (mine_better==-1)
+  {
+    std::cout << "Old solution was better. Debug what went wrong :-(\n";
+  }
+  else
+  {
+    assert(mine_better==0);
+    std::cout << "Current and old solutions have equal quality :-|\n";
+  }
+  
+  // set dx = 0 for testing pave sum-even research code
+  dx=0;
+  
+  bool discrepancy = false;
+  bool first_problem = true;
+  int max_col = ia.used_cols();
+  if (max_col > (int) expected_solution.size())
+    max_col = (int) expected_solution.size();
+  if (max_col > (int) ia.get_solution().size())
+    max_col = (int) ia.get_solution().size();
+  
+  std::multiset<double, std::greater<double> > lex_f_actual, lex_f_expected;
+  
+  for (int c=0; c < max_col; ++c)
+  {
+    const auto actual = ia.get_solution(c);
+    const auto expected = expected_solution[c];
+    if (actual == expected)
+      continue;
+    
+    int lob = std::max(expected-dx,ia.get_bound_lo(c));
+    int hib = std::min(expected+dx,ia.get_bound_hi(c));
+    
+    if (actual<=hib && actual>=lob)
+      continue;
+    
+    // off by more than allowed
+    if (first_problem)
+    {
+      std::cout << "\n";
+      first_problem = false;
+    }
+    const double g = ia.get_goal(c);
+    std::cout << "solution x[" << c << "] = " << actual << ", NOT " << expected << " as expected.";
+    std::cout << " Goal was " << g << " in [";
+    const int lo = ia.get_bound_lo(c);
+    const int hi = ia.get_bound_hi(c);
+    if (lo == std::numeric_limits<int>::lowest())
+      std::cout << "-inf, ";
+    else
+      std::cout << lo << ", ";
+    if (hi == std::numeric_limits<int>::max())
+      std::cout << "inf].";
+    else
+      std::cout << hi << "].";
+    if (g>0.)
+    {
+      int dx_expected, dx_actual;
+      const double f_actual   = f(actual,   g, dx_actual);
+      const double f_expected = f(expected, g, dx_expected);
+      std::cout << " f actual = " << f_actual << ", expected = " << f_expected;
+      lex_f_actual  .insert( f_actual   );
+      lex_f_expected.insert( f_expected );
+    }
+    std::cout << std::endl;
+    // to do, write objective
+    discrepancy=true;
+  }
+  // build lex vector of objective function value for actual and expected, display them
+  if (discrepancy)
+  {
+    std::cout << "solution we found =";
+    for (auto s : ia.get_solution())
+      std::cout << " " << s;
+    std::cout << std::endl;
+    std::cout << "solution expected =";
+    for (auto s : expected_solution)
+      std::cout << " " << s;
+    std::cout << std::endl;
+    
+    // print objective function difference, in sorted order
+    std::cout << "\nFor the solution values that were different:\n";
+    std::cout << "lex f actual: ";
+    for (auto ff : lex_f_actual)
+      std::cout << ff << ", ";
+    std::cout << std::endl;
+    std::cout << "lex f expected: ";
+    for (auto ff : lex_f_expected)
+      std::cout << ff << ", ";
+    std::cout << std::endl;
+  }
+}
+void test_solution_autogen(IIA::IA &ia, std::vector<int> expected_solution)
+{
+  return test_solution_autogen(ia, expected_solution, 1);
+>>>>>>> 102e6a32df728332592cf1864d2867df9cecf6e8
 }
 
 void test_result(IIA::IA &ia)
@@ -1070,11 +1198,38 @@ namespace IIA_Internal
 
 int main(int argc, const char * argv[])
 {
-  
   // test io
   test_io();
   
+  // iia_cubit_test_problem_1583197819390(); return 0;
+  // iia_cubit_test_problem_1583198028742(); return 0;
+  
+  // test sum-even research code
+//  test_problem_even_A();
+//  test_problem_even_AA();
+//  test_problem_even_B();
+//  test_problem_even_C();
+  // return 0;
+  
+//  CpuTimer total_timer;
+//  iia_cubit_test_problem_scale_cren_AA();
+//  double time_used = total_timer.cpu_secs();
+//  std::cout << "main time used " << time_used << std::endl;
+//
+  // return 0;
+  
+  // test_problem_augmented_nullspace_demo(); return 0;
+  
+  // iia_cubit_autotest(); return 0;
+  
+  // tests where use_map_nullspace might make a difference
+  // test_problem_C();
+  // test_problem_E();
+  // test_problem_even_A();
+  // return 0;
+
   // test Reduce Row Echelon RREF and Hermite Normal Form HNF matrix routines
+  // test_problem_HNF_A(); return 0;
   using IIA_Internal::IIATester;
   
   IIATester::test_problem0();
