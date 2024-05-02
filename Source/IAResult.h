@@ -33,7 +33,8 @@ namespace IIA
     log_error = true,
     log_warning=true,
     log_info=false,
-    log_debug=false;
+    log_debug=false,
+    log_debug_time=false;
   };
   
 }

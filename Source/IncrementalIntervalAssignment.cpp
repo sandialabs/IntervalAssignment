@@ -34,6 +34,30 @@ namespace IIA_Internal
   using std::lower_bound;
   using std::back_inserter;
 
+  // forward declarations of internal methods, for reference
+  int round_goal(double g); // return the value of x that minimizes R
+  int gcd(int u, int v);
+  int lcm(int u, int v);
+  void row_simplify_vals(vector<int> &v); // divide row vals by gcd
+  bool row_equal(const RowSparseInt &r, const RowSparseInt &s); // true if s = r or s = -r
+  // may want a method that determines if s = m*r for integer m != 1
+
+  // implementations
+  int round_goal(double g)
+  {
+    const int lo = (int) g;
+    if (lo != g)
+    {
+      auto hi = lo+1;
+      auto gsame = sqrt(lo*hi);
+      return (g>gsame) ? hi : lo;
+    }
+    else
+    {
+      return lo;
+    }
+  }
+
   // greatest common divisor of u and v
   // always returns a positive number, as we take abs of u and v
   int gcd(int u, int v)
@@ -128,13 +152,74 @@ namespace IIA_Internal
     // return m;
   }
   
-  MatrixSparseInt::MatrixSparseInt(MatrixSparseInt&M,int MaxMRow) : result(M.result)
+  bool row_equal(const RowSparseInt &r, const RowSparseInt &s)
   {
-    copy(M.rows.begin(),M.rows.begin()+MaxMRow,back_inserter(rows));
+    // different number of non-zeros?
+    if (r.cols.size() != s.cols.size())
+      return false;
+    // both empty
+    if (r.cols.empty())
+      return true;
+    const bool is_negated = (r.vals[0] == -s.vals[0]);
+    for (int i = 0; i < (int) r.cols.size(); ++i)
+    {
+      // different variable column?
+      if (r.cols[i] != s.cols[i])
+        return false;
+      // different coeff?
+      if (( is_negated && r.vals[0] != -s.vals[0]) ||
+          (!is_negated && r.vals[0] !=  s.vals[0]))
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  MatrixSparseInt::MatrixSparseInt(const MatrixSparseInt&M, int MaxMrow) : result(M.result)
+  {
+    rows.reserve(MaxMrow);
+    copy(M.rows.begin(),M.rows.begin()+MaxMrow,back_inserter(rows));
     col_rows.resize(M.col_rows.size());
     fill_in_cols_from_rows();
   }
   
+  MatrixSparseInt::MatrixSparseInt(const MatrixSparseInt&M, int MaxMrow, const MatrixSparseInt&N, bool no_duplicate_rows) : result(M.result)
+  {
+    rows.reserve(MaxMrow+N.rows.size());
+    copy(N.rows.begin(),N.rows.end(),back_inserter(rows));
+    if (no_duplicate_rows && !N.rows.empty())
+    {
+      for (int r=0; r<MaxMrow; ++r)
+      {
+        // does row r of M exist in N?
+        auto &mrow = M.rows[r];
+        assert(!mrow.cols.empty());
+        int lead_col = mrow.cols[0];
+        // check rows in N with same leading col
+        bool found_duplicate_row = false;
+        for (int s : N.col_rows[lead_col])
+        {
+          if (row_equal(mrow, N.rows[s]))
+          {
+            found_duplicate_row = true;
+            break;
+          }
+        }
+        if (!found_duplicate_row)
+        {
+          rows.push_back(mrow);
+        }
+      }
+    }
+    else
+    {
+      copy(M.rows.begin(),M.rows.begin()+MaxMrow,back_inserter(rows));
+    }
+    col_rows.resize(M.col_rows.size());
+    fill_in_cols_from_rows();
+  }
+
   int IncrementalIntervalAssignment::row_sum(const vector<int>&cols, const vector<int>&coeff, const vector<int> &sol, int rhs)
   {
     int sum=0;
@@ -153,14 +238,194 @@ namespace IIA_Internal
   {
     for ( int i = 0; i <= used_col; ++i)
     {
-      if (overwrite || col_solution[i]==0)
+      if (overwrite || col_solution[i]==0) // zzyk need some other flag than "0" here to indicate unassigned variables, as a sum-even var in a small loop might have been assigned 0 on purpose
       {
-        int v = (int) lround( goals[i] );
+        int v = round_goal( goals[i] );
         v = max(v,col_lower_bounds[i]);
         v = min(v,col_upper_bounds[i]);
         col_solution[i] = v;
       }
     }
+  }
+  
+  bool IncrementalIntervalAssignment::decide_roundup(int r, int c) const
+  {
+    // bounds
+    const auto oob_lo = compute_out_of_bounds(c, col_solution[c]);
+    const auto oob_hi = compute_out_of_bounds(c, col_solution[c]+1);
+    if (oob_lo>0)
+      return true;
+    else if (oob_hi<0)
+      return false;
+    else
+    {
+      // can round up or down and still be in bounds
+      
+      const auto coeff = rows[r].get_val(c);
+      
+      // secondary criteria:
+      //   goals vs. solution of vars in row[c]
+      auto signed_diff_sum = 0.; // sum of solution-goal
+      for (int j = 0; j < (int) rows[r].cols.size(); ++j)
+      {
+        const auto cc = rows[r].cols[j];
+        const auto vv = rows[r].vals[j];
+        const auto s = get_solution(cc);
+
+        const auto opposite_actions = (cc != c && coeff>0 == vv>0);
+        
+        const auto oob_cc_up = compute_out_of_bounds(cc, s+1);
+        const auto oob_cc_dn = compute_out_of_bounds(cc, s-1);
+        
+        if (oob_cc_dn>0) // we want cc to increase (or not decrease) to stay in bounds
+        {
+          if (c!=cc)
+          {
+            if (opposite_actions)
+              signed_diff_sum -= oob_cc_dn; // subtract positive value -> decreases desire of roundup
+            else
+              signed_diff_sum += oob_cc_dn; // add positive value -> increases
+          }
+        }
+        else if (oob_cc_up<0) // we want cc to decrease (or not increase) to stay in bounds
+        {
+          if (c!=cc)
+          {
+            if (opposite_actions)
+              signed_diff_sum -= oob_cc_dn; // subtract negative value -> increases
+            else
+              signed_diff_sum += oob_cc_dn; // add negative value -> decreases
+          }
+        }
+        else // if (oob_cc_up == 0 && oob_cc_dn == 0)
+        {
+          double glo, ghi;
+          get_tied_goals(cc, glo, ghi);
+          const auto g = (glo==ghi ? glo : sqrt(glo*ghi));
+          if (g!=0.)
+          {
+            const auto signed_diff = s-g;
+            
+            // does rounding up encourage cc to increase or decrease?
+            if (opposite_actions)
+            {
+              // rounding up causes cc to decrease.
+              // If signed_diff>0, then rounding up is good
+              signed_diff_sum += signed_diff;
+            }
+            else
+            {
+              // rounding up causes cc to increase.
+              // If signed_diff<0, then rounding up is good
+              signed_diff_sum -= signed_diff;
+            }
+            
+          }
+        }
+      }
+      return (signed_diff_sum >= -3.1); // empirical threshold
+    }
+  }
+  
+  // d = a/b, return true if a%b != 0
+  // always round d down for fractional d
+  // e.g. -7/2 = -4, and 7/2 = 3
+  //   platform-independent results for negative values by avoiding negative values during division and mod
+  bool a_div_b( int &d, int a, int b)
+  {
+    assert(b!=0);
+    d = abs(a) / abs(b); // always positive, rounded towards zero
+    const bool is_neg = ((a>=0) != (b>0)); // true if (a/b)<0 <--> a*b<0 <--> sign(a) != sign(b)
+    const bool is_frac = (abs(a) % abs(b) != 0);
+    if (is_neg)
+    {
+      d = -d;
+      if (is_frac)
+      {
+        --d;
+      }
+    }
+    return is_frac;
+  }
+  
+  void test_a_div_b()
+  {
+    int d;
+    for (int a=-9; a<10; ++a)
+      for( int b=-9; b<10; ++b)
+      {
+        if (b==0)
+          continue;
+        const bool is_frac = a_div_b( d, a, b);
+        printf("%d = %d / %d is %s.\n", d, a, b, (is_frac ? "fractional" : "whole"));
+      }
+  }
+  
+  bool IncrementalIntervalAssignment::assign_dependent_vars(const vector<int>&cols_dep,
+                                                            const vector<int>&rows_dep,
+                                                            vector<int>&cols_fail)
+  {
+    // test_a_div_b();
+    
+    assert(cols_dep.size()==rows_dep.size());
+    bool OK=true;
+    for (size_t i = 0; i < rows_dep.size(); ++i)
+    {
+      const auto r = rows_dep[i];
+      const auto c = cols_dep[i];
+      col_solution[c]=0; // to avoid it contributing to the row_sum
+      const int sum = row_sum(r);
+      const int coeff = rows[r].get_val(c);
+      //
+      //   col_solution[c] = -sum / coeff;
+      if (sum == 0)
+      {
+        col_solution[c] = 0;
+      }
+      else
+      {
+        assert(coeff!=0);
+        const bool is_frac = a_div_b( col_solution[c], -sum, coeff ); // solution = -sum / coeff
+        if (is_frac)
+        {
+          // we have a problem, the dependent var value is not integer (its coeff_dep is not 1)
+          OK=false;
+          cols_fail.push_back(c);
+          
+          // decide whether to round up or down
+          bool roundup = true;
+          
+          if (use_smart_adjust_for_fractions)
+          {
+            roundup = decide_roundup(r,c);
+            result->debug_message("IIA dependent var x%d = %d/%d != integer. Rounding %s.\n",
+                                 c, -sum, coeff, roundup ? "up" : "down");
+          }
+          
+          // round solution value up or down
+          if (roundup)
+            ++col_solution[c];
+          // else already rounded down, no need for --sol
+          
+          result->debug_message("IIA dependent var x%d = %d/%d != integer. Rounding up.\n",
+                                c, -sum, coeff, roundup ? "up" : "down");
+        }
+      }
+      result->debug_message("IIA Assigning dependent var x%d = %d/%d = %d%s\n",
+                            c, -sum, coeff, col_solution[c],
+                            (col_solution[c]<col_lower_bounds[c] || col_solution[c]>col_solution[c]) ? " out of bounds!" : "");
+    }
+    if (result->log_debug)
+    {
+      print_solution("after assigning dependent variables");
+      if (!cols_fail.empty())
+      {
+        result->info_message("failed-to-assign variables, cols_fail A");
+        print_vec(result, cols_fail);
+      }
+    }
+    
+    return OK;
   }
   
   void IncrementalIntervalAssignment::assign_dummies_feasible()
@@ -193,11 +458,21 @@ namespace IIA_Internal
         col_solution[c]=0;
         int sum = row_sum(r);
         int dummy_coeff = get_M(r,c);
-        col_solution[c] = -sum/dummy_coeff;
-        if (dummy_coeff != 1 && sum % dummy_coeff != 0)
+        
+        const bool is_frac = a_div_b( col_solution[c], -sum, dummy_coeff ); // solution = -sum / coeff
+        if (is_frac)
         {
-          // round col_solution up, as this causes less issues with lower bounds
-          ++col_solution[c];
+          bool roundup = true;
+          if (use_smart_adjust_for_fractions)
+          {
+            roundup = decide_roundup(r, c);
+            result->debug_message("constraint row %d not satisfied, dummy var %d rounded %s.\n",
+                                 r, c, roundup ? "up" : "down");
+          }
+          if (roundup)
+            ++col_solution[c];
+          
+          // could try adding in a mapping-phase nullspace vec here
         }
         if (result->log_debug)
         {
@@ -324,24 +599,30 @@ namespace IIA_Internal
     
     return has_tied_variables;
   }
-  
-  void IncrementalIntervalAssignment::remove_tied_variables()
+
+  // return in tied_var_rows all the rows of M that contain a tied variable column
+  bool tied_variable_rows(const MatrixSparseInt &M, const vector< vector<int> > &tied_variables, set<int> &tied_var_rows)
   {
-    // gather affected rows
-    set<int> row_needs_sub;
-    
     for (int c=0; (size_t) c<tied_variables.size(); ++c)
     {
       if (tied_variables[c].size()==1)
       {
         // we need to replace c with tied_variables[c].front() in the matrix, in all the rows that c appears in
         assert(tied_variables[c].front()!=c);
-        for (auto r : col_rows[c])
-        {
-          row_needs_sub.insert(r);
-        }
+        tied_var_rows.insert(M.col_rows[c].begin(),M.col_rows[c].end());
       }
     }
+    return (!tied_var_rows.empty());
+  }
+
+  void IncrementalIntervalAssignment::replace_tied_variables()
+  {
+    // gather affected rows
+    set<int> row_needs_sub;
+    if (!tied_variable_rows(*this,tied_variables,row_needs_sub))
+      return;
+
+    // replace the coefficient of a tied variable with a coefficient of what it is tied to
     for (auto r : row_needs_sub)
     {
       auto &row = rows[r];
@@ -365,14 +646,46 @@ namespace IIA_Internal
           row.vals.push_back(m.second);
         }
       }
-      // row is sorted because set was sorted
+      // row is sorted because rowents was sorted
     }
-    // for now, just rebuild the col_rows from scratch
+    // efficiency improvement: could update the col_rows. For now, just rebuild the col_rows from scratch.
     fill_in_cols_from_rows();
-    // this can result in an empty matrix, e.g. from the opposite sides of a single mapping face.
+    // this can result in an empty matrix, e.g. from the opposite sides of a single mapping face adjacent to a different mapping face
   }
   
-  
+  void IncrementalIntervalAssignment::cull_tied_variables(MatrixSparseInt &M)
+  {
+    
+    // gather affected rows
+    set<int> row_needs_sub;
+    if (!tied_variable_rows(M,tied_variables,row_needs_sub))
+      return;
+    
+    // remove tied variables from rows
+    for (auto r : row_needs_sub)
+    {
+      RowSparseInt newrow;
+      auto &row = M.rows[r];
+
+      for (size_t i=0; i<row.cols.size(); ++i)
+      {
+        int c = row.cols[i];
+        if (tied_variables[c].size()!=1)
+        {
+          newrow.cols.push_back(c);
+          newrow.vals.push_back(row.vals[i]);
+        }
+      }
+      swap(row,newrow);
+    }
+    // remove rows from tied variables
+    for (int c=0; (size_t) c<tied_variables.size(); ++c)
+    {
+      if (tied_variables[c].size()==1)
+        M.col_rows[c].clear();
+    }
+  }
+
   void IncrementalIntervalAssignment::adjust_solution_tied_variables()
   {
     for (int c = 0; (size_t) c < tied_variables.size(); ++c)
@@ -393,16 +706,16 @@ namespace IIA_Internal
           // figure out whether rounding x up or down minimizes the maximum of x/lo and hi/x
           int s = floor(x);
           int t = s+1;
-          if (s>0)
-          {
-            col_solution[c] = (hi/s > t/lo) ? t : s;
-          }
-          // else, weird variable, just leave it I guess
+          double xx = sqrt(s*t);
+          col_solution[c] = (x>xx) ? t : s;
         }
         if (col_solution[c]<col_lower_bounds[c])
           col_solution[c]=col_lower_bounds[c];
         else if (col_solution[c]>col_upper_bounds[c])
           col_solution[c] = col_upper_bounds[c];
+        
+        // also assign solution to the tied variables
+        
         
         // debug
         if (result->log_debug)
@@ -418,7 +731,7 @@ namespace IIA_Internal
     }
   }
   
-  void IncrementalIntervalAssignment::cull_nullspace_tied_variables(MatrixSparseInt&M, int &MaxMrow)
+  void IncrementalIntervalAssignment::cull_nullspace_tied_variable_rows(MatrixSparseInt&M, int &MaxMrow)
   {
     bool found=false;
     for (int r=0; r<MaxMrow; )
@@ -481,7 +794,7 @@ namespace IIA_Internal
     return 0;
   }
   
-  bool IncrementalIntervalAssignment::compute_tied_goals(int c, double &goal_lowest, double &goal_highest) const
+  bool IncrementalIntervalAssignment::get_tied_goals(int c, double &goal_lowest, double &goal_highest) const
   {
     if (has_tied_variables && tied_variables[c].size()>1)
     {
@@ -700,13 +1013,13 @@ namespace IIA_Internal
   }
   
   
-  bool IncrementalIntervalAssignment::satisfy_constaints(const vector<int>&cols_dep,
+  bool IncrementalIntervalAssignment::satisfy_constraints(const vector<int>&cols_dep,
                                                          const vector<int>&cols_ind,
                                                          const vector<int>&rows_dep)
   {
     // debug
     CpuTimer *timer(nullptr);
-    if (result->log_debug)
+    if (result->log_debug_time)
     {
       timer = new CpuTimer;
     }
@@ -724,56 +1037,75 @@ namespace IIA_Internal
     //   if it works, gets a solution close to the goals
     // backup is HNF, which always finds a solution if it exists, but the solution is often far from the goals
     
-    bool rc=true;
+    bool rc=false;
     bool did_hnf=false;
     
+    //rref
     // independent vars have already been assigned something
-    // back-substitute values from indepedent vars to dependent vars
-    vector<int>cols_fail;
-    if (!assign_dependent_vars(cols_dep,rows_dep,cols_fail))
+    if (!use_HNF_always)
     {
-      // result->info_message("cols_fail B"); print_vec(result, cols_fail);
-      result->debug_message("First pass at assigning dependent vars integer values failed. Now trying to adjust independent vars.\n");
-      // work harder for a feasible assignment
-      
-      // adjust independent vars that only appear in a single row, see if that provides an integer solution to the dependent vars
-      if (!adjust_independent_vars(cols_fail))
+      // back-substitute values from indepedent vars to dependent vars
+      rc=true; // will set it to false if it fails
+      vector<int>cols_fail;
+      if (!assign_dependent_vars(cols_dep,rows_dep,cols_fail))
       {
-        result->debug_message("Second pass at assigning dependent vars integer values failed. Now trying Hermite normal form. If that fails, the problem is infeasible and there is no solution.\n");
+        // result->info_message("cols_fail B"); print_vec(result, cols_fail);
+        result->debug_message("First pass at assigning dependent vars integer values failed. Now trying to adjust independent vars.\n");
+        // work harder for a feasible assignment
         
-        // fallback is HNF
-        //   In theory it always finds an integer solution if there is one
-        did_hnf=true;
-        MatrixSparseInt B(result), U(result);
-        vector<int> hnf_col_order;
-        auto OK = HNF(B,U,hnf_col_order);
-        if (!OK)
+        // adjust independent vars that only appear in a single row, see if that provides an integer solution to the dependent vars
+        if (!adjust_independent_vars(cols_fail))
         {
-          result->error_message("HNF algorithm failed; implementation error.\n");
+          result->debug_message("Second pass at assigning dependent vars integer values failed.\n");
           rc=false;
-        }
-        else
-        {
-          OK = HNF_satisfy_constraints(B,U,hnf_col_order);
-          if (!OK)
-          {
-            // problem is infeasible, it's not an error if this happens
-            rc=false;
-          }
         }
       }
     }
+    //HNF
+    if (!rc)
+    {
+      // fallback is HNF
+      //   It always finds an integer solution if there is one
+      result->debug_message("Now trying Hermite normal form. If that fails, the problem is infeasible and there is no solution.\n");
+      
+      did_hnf=true;
+      MatrixSparseInt B(result), U(result);
+      vector<int> hnf_col_order;
+      // init g to col_solution, because col_solution was previously assigned based on goals and dummy-variable's row-sums
+      vector<int> g(col_solution);
+      auto OK = HNF(B,U,hnf_col_order,g);
+      if (!OK)
+      {
+        result->error_message("HNF algorithm failed; implementation error.\n");
+      }
+      else
+      {
+        OK = HNF_satisfy_constraints(B,U,hnf_col_order,g);
+        if (OK)
+        {
+          rc=true;
+        }
+        // else
+        //   problem is infeasible, it's not an error if this happens
+      }
+    }
+    
+    // verify solution
     if (rc && !did_hnf)
     {
       verify_constraints_satisfied(result->log_info || result->log_debug); // hnf_satisfy_constraints calls this already itself
     }
     
     // debug
-    if (result->log_debug)
+    if (result->log_debug_time)
     {
       double time_feas = timer->cpu_secs();
       result->info_message("Satisfy constraint time %f\n",time_feas);
       delete timer;
+    }
+    else if (result->log_debug)
+    {
+      result->debug_message("Satisfy constraint done\n");
     }
     //debug
     
@@ -783,7 +1115,7 @@ namespace IIA_Internal
   void IncrementalIntervalAssignment::build_Q(priority_queue< QElement > &Q,
                                               SetValuesFn &set_val_fn,
                                               double threshold,
-                                              const vector<int> &qcol)
+                                              const vector<int> &qcol) const
   {
     for (auto c : qcol )
     {
@@ -850,11 +1182,241 @@ namespace IIA_Internal
     
     return false;
   }
+
+  // desire to improve variables that are far from their goal, towards their goal
+  // positive means variable would get better
+  // negative means variable would get worse
+  // 0 means no goal "don't care"
+  //   ersatz g:x ratio that will also allow zero and negative x's
+  double increment_desire_goal(int x, int dx, double g)
+  {
+    if (g==0.)  // no goal
+      return 0.;
+
+    const auto dist_gx   = (g- x);      const auto abs_gx   = fabs(dist_gx);
+    const auto dist_gxdx = (g-(x+dx));  const auto abs_gxdx = fabs(dist_gxdx);
+    const auto denom = 0.5 + fabs(g);
+                        
+    // incrementing would make it farther away from its goal
+    if (abs_gxdx>abs_gx)
+      return -abs_gxdx / denom;
+    // incrementing would make it not farther, but flip the sign of g-x
+    const bool pos_gxdx( dist_gxdx>0. ), pos_gx( dist_gx>0. );
+    if ( pos_gxdx != pos_gx )
+    {
+      // return a positive value, but of the smaller one
+      return min(abs_gxdx, abs_gx) / denom;
+    }
+    // incrementing would make it not farther, and keep it on the same side
+    return abs_gx / denom;
+  }
+
+  bool IncrementalIntervalAssignment::unbounded_bounds_improvement(int tc, int dx, map<int,int> &improved_cols,
+                                                                   QWithReplacement &Q, SetValuesFn &val_bounds_Q, const double threshold,
+                                                                   const MatrixSparseInt &MN,
+                                                                   BlockingCols &blocking_cols, vector<int> &deferred_rows)
+  {
+    if (tc >= (int) MN.col_rows.size())
+      return false;
+    
+    // use rows that don't make *any* variable closer to its bounds
+    //   unique for bounds, which are often one-sided, in contrast to "improve" where we must make tradeoffs
+    //   this doesn't seem to help much, but it doesn't hurt
+    
+    // pick *best* unbounded row, not just the first we find
+    //   no need for a queue, since we just use the best one then quit
+    //
+    // if row's variable is below it's bound, increment by that row until the bound is met
+    //   pick the best such row, the variable farthest from its lower bound
+    // quality: if a variable is below its goal, increment by that row until <= goal.
+    //   pick the best such row, the one farthest below its goal
+    // quality: pick the variable least over its goal, increment it once, then recheck.
   
-  bool IncrementalIntervalAssignment::satisfy_bounds(MatrixSparseInt&M, int MaxMrow)
+    auto &tc_rows=MN.col_rows[tc];
+    int biggest_bounds_deficit = 0;
+    double biggest_quality(0.), best_degrade(numeric_limits<double>::max()); // prefer smaller degrade
+    int best_unbounded_row = -1;
+    for (int m : tc_rows )
+    {
+      auto &row = MN.rows[m];
+    
+      // a row is bounded if when we add it forever to the solution some variable bound is violated
+      // get sign of coefficient for tc in this row.
+      const auto dxx = row.get_val(tc) > 0 ? dx : -dx;
+      bool unbounded = true;
+      int row_deficit = 0;
+      double row_quality(0.), row_degrade(0);
+      for (size_t i = 0; i < row.cols.size(); ++i)
+      {
+        auto c = row.cols[i];
+        auto v = row.vals[i];
+        auto dc = dxx * v; // how much x[c] will change, signed
+        if (( (dc < 0) && (col_lower_bounds[c] != numeric_limits<int>::lowest()) ) ||
+            ( (dc > 0) && (col_upper_bounds[c] != numeric_limits<int>::max()   ) ))
+        {
+          unbounded = false;
+          deferred_rows.push_back(m);
+          break;
+        }
+        const int x = col_solution[c];
+
+        // bounds
+        // we already checked that it was unbounded in the right way, so any deficit is one that would be improved by an increment
+        const int bounds_deficit = abs(compute_out_of_bounds(c,x)); // maybe we should divide by v, too.
+        row_deficit = max(row_deficit,bounds_deficit);
+        
+        // goals
+        auto dg = increment_desire_goal(x, dc, goals[c]);
+        if (dg>0)
+        {
+          row_quality = max(row_quality, dg);
+        }
+        else
+        {
+          row_degrade = max(row_degrade, fabs(dg));
+        }
+      }
+      // criteria:
+      // unbounded
+      // bigger deficit
+      //   tied deficit and smaller degrade
+      //   tied deficit and tied degrade and larger quality
+      if (unbounded &&
+          (biggest_bounds_deficit<row_deficit ||
+           (biggest_bounds_deficit==row_deficit && row_degrade<best_degrade) ||
+           (biggest_bounds_deficit==row_deficit && row_degrade==best_degrade && biggest_quality<=row_quality) ) )
+      {
+        best_unbounded_row = m;
+        biggest_bounds_deficit = row_deficit;
+        biggest_quality = row_quality;
+        best_degrade = row_degrade;
+      }
+    }
+        
+    // if there was an unbounded row, use the best one
+    if (best_unbounded_row>=0)
+    {
+      const int m = best_unbounded_row;
+
+      // debug
+      if (result->log_debug)
+      {
+        // result->error_message("Found a case where unbounded works!\n");
+        result->debug_message("row %d unbounded ",(int)m);
+        MN.rows[m].print_row(result);
+      }
+      // debug
+      
+      // accept_strict_improvement is overkill and inefficient in this case, but it works
+      bool self_block = false;
+      int self_block_coeff = 0;
+      int num_block;
+      if (accept_strict_improvement(Q, val_bounds_Q, threshold, nullptr, 0., tc, MN.rows[m], dx,
+                                    self_block, self_block_coeff, blocking_cols, num_block, improved_cols))
+      {
+        return true;
+      }
+      else
+      {
+        result->error_message("Incremental Interval Assignment algorithm error. The row was unbounded but was somehow blocked, a contradiction.\n");
+      }
+    }
+    return false;
+  }
+  
+  bool bigger_quality(pair<int,double>& a, 
+                      pair<int,double>& b)
+  {
+    return a.second > b.second;
+  }
+
+  bool IncrementalIntervalAssignment::queue_rows_by_quality( int tc, int dx, const MatrixSparseInt &MN, int m,
+                                                            vector< pair<int,double> > &rows_by_quality)
+  {
+    auto &row = MN.rows[m];
+    const auto dxx = row.get_val(tc) > 0 ? dx : -dx;
+    double qbest = 0., qworst = 0.;
+    for (size_t i = 0; i < row.cols.size(); ++i)
+    {
+      const auto c = row.cols[i];
+      const auto v = row.vals[i];
+      const int x = col_solution[c]; // current value
+      const auto dc = dxx * v; // how much x[c] will change, signed
+      const int xdc = x+dc; // new value
+      
+      // bounds
+      // will incrementing make the bounds worse?
+      if ( abs(compute_out_of_bounds(c,xdc)) > abs(compute_out_of_bounds(c,x)) )
+      {
+        return false;
+      }
+      
+      // goals
+      auto dg = increment_desire_goal(x, dc, goals[c]);
+      qbest  = max(qbest,dg);
+      qworst = min(qworst,dg);
+    }
+    const auto q = qbest + qworst;
+    rows_by_quality.emplace_back( m, q );
+    return true;
+  }
+
+  // look for any row that works
+  bool IncrementalIntervalAssignment::any_bounds_improvement(int tc, int dx, map<int,int> &improved_cols,
+                                                             QWithReplacement &Q, SetValuesFn &val_bounds_Q, const double threshold,
+                                                             const MatrixSparseInt &MN, BlockingCols &blocking_cols, vector<int> &deferred_rows,
+                                                             int &smallest_self_block_coeff, bool &give_up)
+  {
+    // pick *best* row, not just the first we find that works
+    vector< pair<int,double> > rows_by_quality;
+    for (auto m : deferred_rows )
+    {
+      queue_rows_by_quality(tc, dx, MN, m, rows_by_quality);
+    }
+    if (use_best_improvement)
+    {
+      sort( rows_by_quality.begin(), rows_by_quality.end(), bigger_quality);
+    }
+
+    for (auto rq : rows_by_quality)
+    {
+      int m = rq.first;
+      // double q = rq.second
+      bool self_block = false;
+      int self_block_coeff = 0;
+      int num_block = 0;
+      // satisfy bounds
+      if (accept_strict_improvement(Q, val_bounds_Q, threshold, nullptr, 0., tc, MN.rows[m], dx,
+                                    self_block, self_block_coeff, blocking_cols, num_block, improved_cols))
+      {
+        return true;
+      }
+      else if (self_block)
+      {
+        result->debug_message("row %d selfblocks col %d\n",(int)m,tc);
+        // give up later on this variable if it's not possible to get a combination with a smaller coefficient
+        smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
+        
+        // give up immediately if the increment is the smallest it could be
+        if (smallest_self_block_coeff==1)
+        {
+          give_up=true;
+          return false;
+        }
+      }
+      else
+      {
+        result->debug_message("row %d blocked\n",(int)m);
+      }
+    }
+    return false;
+  }
+  
+  
+  bool IncrementalIntervalAssignment::satisfy_bounds(const MatrixSparseInt&M, MatrixSparseInt&MN)
   {
     CpuTimer *timer=nullptr;
-    if (result->log_debug)
+    if (result->log_debug_time)
     {
       timer = new CpuTimer;
     }
@@ -864,7 +1426,7 @@ namespace IIA_Internal
     vector<int>cols_fail;
     if (!bounds_satisfied(cols_fail))
     {
-      if (M.col_rows.empty())
+      if (MN.col_rows.empty())
       {
         result->debug_message("\nIIA: unable to find a solution that satisfies the variable bounds because the nullspace is empty.\n");
         return false;
@@ -879,20 +1441,22 @@ namespace IIA_Internal
       //   find a null-space-basis vector, or a linear sum of them, to move vars closer to their bound.
       //   Strict improvement required at each step.
       
-      SetValuesBounds val_bounds_Q;
-      const double threshold=0.;
-      
       // priority queue for variable bounds
       // build Q
+      SetValuesBounds val_bounds_Q;
+      const double threshold=0.;
       QWithReplacement Q(this,val_bounds_Q,threshold);
       Q.build( cols_fail );
       
       // store the blocking column that had the fewest blocking variables
       BlockingCols blocking_cols, all_blocking_cols;
+      vector<int> deferred_rows;
       map<int,int> improved_cols;
+      
+      // We use MB2 for doing the Gaussian elimination, then concatenating MN with any rows we found
+      //   continuing the partial elimination of MB2 on subsequent interations is a big speedup, 3x
       // implicit MB2 order of columns, can be deduced by rows [0,r)
-      // continuing the partial elimination of MB2 on subsequent interations is a big speedup, 3x
-      MatrixSparseInt MB2(M,MaxMrow);
+      MatrixSparseInt MB2(M);
       int r=0; // next row of MB2 to reduce
       
       // debug
@@ -916,7 +1480,7 @@ namespace IIA_Internal
           break;
         
         // get sign of needed change
-        auto dx = compute_out_of_bounds(t.c,t.solution) > 0 ? 1 : -1;
+        int dx = compute_out_of_bounds(t.c,t.solution) > 0 ? 1 : -1;
         
         // shortcut
         // if incrementing t.c doesn't improve quality, then skip all the rest
@@ -928,255 +1492,185 @@ namespace IIA_Internal
           // search the nullspace for a vector that makes t better,
           // check that it doesn't degrade the min-max
           // if none, try a combination of nullspace vectors...
-          bool fixed=false;
-          bool give_up=false;
           int smallest_self_block_coeff=numeric_limits<int>::max();
+          bool fixed=false;
+          bool give_up = (MN.col_rows.size() <= t.c) || MN.col_rows[t.c].empty();
+          if (give_up)
           {
-            int num_block=0;
+            result->debug_message("IIA nullspace: It's not possible to improve x%d to be within bounds because it isn't in the nullspace at all. Giving up on this variable.\n", t.c);
+            rc=false;
+          }
+          else
+          {
             blocking_cols.clear();
-            assert(t.c < (int) M.col_rows.size());
-            auto &tc_rows=M.col_rows[t.c];
-            if(tc_rows.empty())
+            deferred_rows.clear();
+
+            const bool debug_pave_research_code(false);
+            
+            // look for unbounded MN
+            fixed = false;
+            if (!fixed)
             {
-              give_up=true;
+              fixed = unbounded_bounds_improvement(t.c,dx,improved_cols, Q,val_bounds_Q,threshold, MN, blocking_cols,deferred_rows);
+              if (debug_pave_research_code && fixed) result->info_message("bound fixed: by unbounded row of M+Nullspace\n");
             }
-            else
+            // look for any MN
+            if (!fixed)
             {
-              // use rows that don't make *any* variable closer to its bounds
-              //   unique for bounds, which are often one-sided, in contrast to "improve" where we must make tradeoffs
-              //   this doesn't seem to help much, but it doesn't hurt
-              vector<int> deferred_rows;
-              const bool go_in_unbounded_directions_first = true;
-              if (go_in_unbounded_directions_first)
+              fixed = any_bounds_improvement(t.c,dx,improved_cols, Q,val_bounds_Q,threshold, MN, blocking_cols,deferred_rows,smallest_self_block_coeff, give_up);
+              if (debug_pave_research_code && fixed) result->info_message("bound fixed: by any row of Nullspace\n");
+            }
+            if (debug_pave_research_code && !fixed)
+            {
+              if (give_up)
+                result->info_message("bound not fixed yet, giving up.\n");
+              else
+                result->info_message("bound not fixed yet, doing Gaussian elimination.\n");
+            }
+  
+            // have to consider a combination of rows
+            if (!fixed)
+            {
+              result->debug_message("\nIIA nullspace: No single nullspace vector gave strict improvement towards the bounds of x%d\n", t.c);
+              // Find a nullspace combination that doesn't have the blocking vars in the forbidden directions
+              
+              // if we fail, then don't put t back on the queue, but keep trying to improve the other vars
+              
+              if (give_up)
               {
-                for (int m : tc_rows )
+                result->debug_message("IIA nullspace: It's not possible to improve x%d to be within bounds. Giving up on this variable.\n", t.c);
+                rc=false;
+              }
+              else if (M.col_rows[t.c].empty())
+              {
+                result->debug_message("Variable x%d isn't in any M nullspace row, so its impossible to improve!\n",t.c);
+                // this isn't an error if we are doing autoscheme and the surface doesn't admit that scheme.
+                result->debug_message("Unable to assign intervals within bounds, check mesh scheme, vertex types and sweep directions.\n");
+                rc=false;
+              }
+              else
+              {
+                // Find a nullspace combination that doesn't have the blocking vars in them (either plus or minus)
+                auto old_num_rows=MN.rows.size();
+                
+                do
                 {
-                  // a row is bounded if when we add it forever to the solution some variable bound is violated
-                  auto &row = M.rows[m];
-                  bool bounded = false;
-                  for (size_t i = 0; i < row.cols.size(); ++i)
+                  int unblocked_row=-1;
+                  const bool worked = MB2.gaussian_elimination(t.c, blocking_cols, smallest_self_block_coeff, improved_cols, all_blocking_cols, r, unblocked_row);
+                  
+                  if (worked)
                   {
-                    auto c = row.cols[i];
-                    auto v = row.vals[i];
-                    auto dc = dx * v;
-                    if (( (dc < 0) && (col_lower_bounds[c] != numeric_limits<int>::lowest()) ) ||
-                        ( (dc > 0) && (col_upper_bounds[c] != numeric_limits<int>::max()   ) ))
-                    {
-                      bounded = true;
-                      break;
-                    }
-                  }
-                  if (bounded)
-                  {
-                    deferred_rows.push_back(m);
-                  }
-                  else
-                  {
+                    const RowSparseInt &R=MB2.rows[unblocked_row];
+                    
                     // debug
-                    // result->error_message("Found a case where unbounded works!\n");
                     if (result->log_debug)
                     {
-                      result->debug_message("row %d unbounded ",(int)m);
-                      row.print_row(result);
+                      result->debug_message("Gaussian success, new row ");
+                      R.print_row(result);
+                      // M.print_matrix("new nullspace");
                     }
-                    // debug
                     
-                    // accept_strict_improvement is overkill and inefficient in this case, but it works
-                    bool self_block = false;
-                    int self_block_coeff = 0;
-                    if (accept_strict_improvement(Q, val_bounds_Q, threshold, nullptr, 0., t.c, M.rows[m], dx,
+                    
+                    int num_block=0;
+                    bool self_block=false;
+                    int self_block_coeff=0;
+                    const size_t old_size = blocking_size(blocking_cols);
+                    
+                    if (accept_strict_improvement(Q, val_bounds_Q, threshold, nullptr, 0., t.c, R, dx,
                                                   self_block, self_block_coeff, blocking_cols, num_block, improved_cols))
                     {
+                      MN.push_row(R);
                       fixed=true;
-                      break;
                     }
                     else
                     {
-                      result->error_message("Incremental Interval Assignment algorithm error. The row was unbounded but was somehow blocked, a contradiction.\n");
+                      // try again, unless there is no hope of progress
+                      
+                      // give up if we can't get the self_block coefficient smaller
+                      if (self_block)
+                      {
+                        smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
+                        if (smallest_self_block_coeff==1)
+                        {
+                          result->debug_message("  Giving up! self_blocking coefficient is 1. latest self_block_coeff=%d.\n", smallest_self_block_coeff);
+                          give_up=true;
+                        }
+                      }
+                      // give up if no progress
+                      else
+                      {
+                        auto new_size = blocking_size(blocking_cols);
+                        if (old_size==new_size)
+                        {
+                          result->debug_message("  Giving up! blocking_cols size=%d didn't increase.\n", (int)new_size);
+                          give_up=true;
+                        }
+                      }
                     }
                   }
-                } // for tc_rows
-              }
-              
-              // look for any row that works
-              if (!fixed)
-              {
-                for (size_t m : (go_in_unbounded_directions_first ? deferred_rows : tc_rows) )
-                {
-                  bool self_block = false;
-                  int self_block_coeff = 0;
-                  // satisfy bounds
-                  if (accept_strict_improvement(Q, val_bounds_Q, threshold, nullptr, 0., t.c, M.rows[m], dx,
-                                                self_block, self_block_coeff, blocking_cols, num_block, improved_cols))
+                  else // (!worked)
                   {
-                    fixed=true;
-                    break;
-                  }
-                  else if (self_block)
-                  {
-                    result->debug_message("row %d selfblocks col %d\n",(int)m,t.c);
-                    // give up later on this variable if it's not possible to get a combination with a smaller coefficient
-                    smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
-                    
-                    // give up immediately if the increment is the smallest it could be
-                    if (smallest_self_block_coeff==1)
+                    give_up=true;
+                    if (result->log_debug)
                     {
-                      give_up=true;
-                      break;
+                      result->debug_message("  Giving up! Gaussian elimination failed.\n");
+                      {
+                        result->info_message("MB2 r=%d reduced rows\n",r);
+                        MB2.print_matrix("MB2");
+                        result->info_message("all_blocking_cols ");
+                        print_map(all_blocking_cols);
+                      }
                     }
+                  }
+                  
+                  if ( (size_t)r==MB2.rows.size())
+                  {
+                    result->debug_message("  Giving up! there are no more rows to reduce\n");
+                    give_up=true;
+                  }
+                  
+                  
+                } while (!fixed && !give_up);
+                if (!fixed)
+                  rc=false;
+                
+                // debug
+                if (result->log_debug)
+                {
+                  size_t num_new_rows = MN.rows.size() - old_num_rows;
+                  result->debug_message("IIA: nullspace: %lu rows added; was %lu, now %lu.\n",
+                                        (unsigned long) num_new_rows,
+                                        (unsigned long) old_num_rows,
+                                        (unsigned long) MN.rows.size());
+                  if (num_new_rows>0)
+                  {
+                    result->info_message("bounds old last row + new rows\n");
+                    const size_t i_start = (old_num_rows>0 ? old_num_rows-1 : 0);
+                    
+                    for (size_t i = i_start; i<MN.rows.size(); ++i)
+                    {
+                      result->debug_message("row %d ",(int)i);
+                      MN.rows[i].print_row(result);
+                    }
+                  }
+                  result->debug_message("Blocking x columns = ");
+                  print_map(blocking_cols);
+                  if (fixed)
+                  {
+                    result->debug_message("IIA nullspace: fixed x%d . We made a row with a non-zero coeff for it, but zero for the blocking cols.\n", t.c);
                   }
                   else
                   {
-                    result->debug_message("row %d blocked\n",(int)m);
+                    result->debug_message("\n\nIIA nullspace: FAILED to fix x%d. Blocking columns won. I'll keep trying to satisfy_bounds on the other variables.\n\n", t.c);
+                    MN.print_matrix("MN nullspace");
+                    MB2.print_matrix("MB2 Gaussian-elim working nullspace");
                   }
                 }
+                // debug
+                
               }
-            }
+            } // !fixed
           }
-          
-          if (!fixed)
-          {
-            result->debug_message("\nIIA nullspace: No single nullspace vector gave strict improvement towards the bounds of x%d\n", t.c);
-            // Find a nullspace combination that doesn't have the blocking vars in the forbidden directions
-            
-            // if we fail, then don't put t back on the queue, but keep trying to improve the other vars
-            
-            if (give_up)
-            {
-              result->debug_message("IIA nullspace: It's not possible to improve x%d to be within bounds. Giving up on this variable.\n", t.c);
-              rc=false;
-            }
-            else if (M.col_rows[t.c].empty())
-            {
-              result->debug_message("Variable x%d isn't in any nullspace row, so its impossible to improve!\n",t.c);
-              // this isn't an error if we are doing autoscheme and the surface doesn't admit that scheme.
-              result->debug_message("Unable to assign intervals within bounds, check mesh scheme, vertex types and sweep directions.\n");
-              rc=false;
-            }
-            else
-            {
-              // Find a nullspace combination that doesn't have the blocking vars in them (either plus or minus)
-              auto old_num_rows=M.rows.size();
-              
-              do
-              {
-                int unblocked_row=-1;
-                const bool worked = MB2.gaussian_elimination(t.c, blocking_cols, smallest_self_block_coeff, improved_cols, all_blocking_cols, r, unblocked_row);
-                
-                if (worked)
-                {
-                  RowSparseInt R=MB2.rows[unblocked_row]; // overwrites
-                  
-                  // debug
-                  if (result->log_debug)
-                  {
-                    result->debug_message("Gaussian success, new row ");
-                    R.print_row(result);
-                    // M.print_matrix("new nullspace");
-                  }
-                  
-                  
-                  int num_block=0;
-                  bool self_block=false;
-                  int self_block_coeff=0;
-                  const size_t old_size = blocking_size(blocking_cols);
-                  
-                  if (accept_strict_improvement(Q, val_bounds_Q, threshold, nullptr, 0., t.c, R, dx,
-                                                self_block, self_block_coeff, blocking_cols, num_block, improved_cols))
-                  {
-                    M.push_row(R);
-                    fixed=true;
-                  }
-                  else
-                  {
-                    
-                    // try again, unless there is no hope of progress
-                    
-                    // give up if we can't get the self_block coefficient smaller
-                    if (self_block)
-                    {
-                      smallest_self_block_coeff=min(smallest_self_block_coeff,self_block_coeff);
-                      if (smallest_self_block_coeff==1)
-                      {
-                        result->debug_message("  Giving up! self_blocking coefficient is 1. latest self_block_coeff=%d.\n", smallest_self_block_coeff);
-                        give_up=true;
-                      }
-                    }
-                    // give up if no progress
-                    else
-                    {
-                      auto new_size = blocking_size(blocking_cols);
-                      if (old_size==new_size)
-                      {
-                        result->debug_message("  Giving up! blocking_cols size=%d didn't increase.\n", (int)new_size);
-                        give_up=true;
-                      }
-                    }
-                  }
-                }
-                else // (!worked)
-                {
-                  give_up=true;
-                  if (result->log_debug)
-                  {
-                    result->debug_message("  Giving up! Gaussian elimination failed.\n");
-                    {
-                      result->info_message("MB2 r=%d reduced rows\n",r);
-                      MB2.print_matrix("MB2");
-                      result->info_message("all_blocking_cols ");
-                      print_map(all_blocking_cols);
-                    }
-                  }
-                }
-                
-                if ( (size_t)r==MB2.rows.size())
-                {
-                  result->debug_message("  Giving up! there are no more rows to reduce\n");
-                  give_up=true;
-                }
-                
-                
-              } while (!fixed && !give_up);
-              if (!fixed)
-                rc=false;
-              
-              // debug
-              if (result->log_debug)
-              {
-                size_t num_new_rows = M.rows.size() - old_num_rows;
-                result->debug_message("IIA: nullspace: %lu rows added; was %lu, now %lu.\n",
-                                      (unsigned long) num_new_rows,
-                                      (unsigned long) old_num_rows,
-                                      (unsigned long) M.rows.size());
-                // M.print_matrix("augmented nullspaceB");
-                if (num_new_rows>0)
-                {
-                  result->info_message("bounds old last row + new rows\n");
-                  const size_t i_start = (old_num_rows>0 ? old_num_rows-1 : 0);
-                  
-                  for (size_t i = i_start; i<M.rows.size(); ++i)
-                  {
-                    result->debug_message("row %d ",(int)i);
-                    M.rows[i].print_row(result);
-                  }
-                }
-                result->debug_message("Blocking x columns = ");
-                print_map(blocking_cols);
-                if (fixed)
-                {
-                  result->debug_message("IIA nullspace: fixed x%d . We made a row with a non-zero coeff for it, but zero for the blocking cols.\n", t.c);
-                }
-                else
-                {
-                  result->debug_message("\n\nIIA nullspace: FAILED to fix x%d. Blocking columns won. I'll keep trying to satisfy_bounds on the other variables.\n\n", t.c);
-                  M.print_matrix("M nullspace");
-                  MB2.print_matrix("MB2 working nullspace");
-                }
-              }
-              // debug
-              
-            }
-          } // !fixed
         } // if (u<t)
         else
         {
@@ -1214,14 +1708,21 @@ namespace IIA_Internal
       
     }
     else
+    {
       result->debug_message("\nIIA: initial solution already satisfies the variable bounds\n");
-    
+//      result->warning_message("\nIIA: initial solution already satisfies the variable bounds\n");
+    }
+
     // debug
-    if (result->log_debug)
+    if (result->log_debug_time)
     {
       double time_bounds = timer->cpu_secs();
       result->info_message("Satisfy variable bounds time %f\n",time_bounds);
       delete timer;
+    }
+    else if (result->log_debug)
+    {
+      result->debug_message("Satisfy variable bounds done\n");
     }
     
     return success;
@@ -1264,7 +1765,7 @@ namespace IIA_Internal
   bool IncrementalIntervalAssignment::is_improvement(QElement &s,
                                                      QElement &t,
                                                      SetValuesFn *constraint_fn,
-                                                     double constraint_threshold )
+                                                     double constraint_threshold ) const
   {
     if (constraint_fn)
     {
@@ -1302,7 +1803,7 @@ namespace IIA_Internal
                                                                 SetValuesFn *constraint_fn,
                                                                 double constraint_threshold,
                                                                 int tc,
-                                                                RowSparseInt &mrow,
+                                                                const RowSparseInt &mrow,
                                                                 int dx,
                                                                 bool &self_block,
                                                                 int &self_block_coeff,
@@ -1333,7 +1834,7 @@ namespace IIA_Internal
       
       // old q value
       qold[i].c = c;
-      quality_fn.set_values(*this,qold[i]); // sets qold[i].solution // zzyk optimization, just get this from QWithReplacement !!!
+      quality_fn.set_values(*this,qold[i]); // sets qold[i].solution // optimization, just get this from QWithReplacement !!!
       
       // update solution
       auto v = mrow.vals[i]; // coefficient
@@ -1466,9 +1967,9 @@ namespace IIA_Internal
     return true;
   }
   
-  void IncrementalIntervalAssignment::improve_solution(MatrixSparseInt&M, int MaxMrow, MatrixSparseInt&N)
+  void IncrementalIntervalAssignment::improve_solution(const MatrixSparseInt&M, MatrixSparseInt&MN)
   {
-    if (M.col_rows.empty())
+    if (MN.col_rows.empty())
     {
       result->debug_message("IIA: unable to improve_solution because nullspace is empty\n.");
       return;
@@ -1476,8 +1977,8 @@ namespace IIA_Internal
     
     // debug data
     CpuTimer *timer(nullptr), *timer_0(nullptr), *timer_1(nullptr), *accept_timer(nullptr);
-    
-    if (result->log_debug)
+        
+    if (result->log_debug_time)
     {
       timer = new CpuTimer;
       timer_0 = new CpuTimer;
@@ -1492,7 +1993,7 @@ namespace IIA_Internal
     double time_0=0., time_0f=0., time_0not=0.,time_1=0.;
     size_t accept_calls(0);
     double accept_time=0.;
-    size_t M_rows_init=M.rows.size();
+    size_t MN_rows_init=MN.rows.size();
     // debug
     
     // bounds are already satisfied
@@ -1508,11 +2009,11 @@ namespace IIA_Internal
     
     // COMMIT test suite fails/passes invariant to which of thsese two priority fn we use
     // The first one worked better for the mesh scaling IIA
-    SetValuesRatioR priority_fn;  // based on current value+/-1
-    const double priority_threshold=0.01;
-    // SetValuesRatio priority_fn;  // based on current value
-    // const double priority_threshold=1.;
-    
+    SetValuesRatioR priority_fn_RatioR;  // based on current value+/-1
+    const double priority_threshold_RatioR=0.01;
+    SetValuesRatioG priority_fn_RatioG;  // based on current value, except if optimal (close to goal G) don't select it
+    const double priority_threshold_RatioG=1.;
+
     SetValuesRatio quality_fn;
     const double quality_threshold=0;
     
@@ -1525,7 +2026,9 @@ namespace IIA_Internal
     // With a priority_queue, we have duplicates in the Q and spend too much time once we are stuck.
     
     // build Q
-    QWithReplacement Q(this,priority_fn,priority_threshold);
+    SetValuesFn *priority_fn =  use_Ratio_for_improvement_queue ? (SetValuesFn*) &priority_fn_RatioG : (SetValuesFn*) &priority_fn_RatioR;
+    double priority_threshold = use_Ratio_for_improvement_queue ?          priority_threshold_RatioG :          priority_threshold_RatioR;
+    QWithReplacement Q(this,*priority_fn,priority_threshold);
     // get all the columns, except the tied_variables
     vector<int>untied_int_vars;
     untied_int_vars.reserve(used_col+1);
@@ -1535,6 +2038,7 @@ namespace IIA_Internal
         untied_int_vars.push_back(c);
     }
     Q.build( untied_int_vars );
+    // Q.print();
     
     // blocking_cols are just the ones that we discovered that block the current variable from incrementing
     // all_blocking_cols are the union blocking_cols from all prior increment attempts
@@ -1542,7 +2046,7 @@ namespace IIA_Internal
     BlockingCols blocking_cols, all_blocking_cols;
     map<int,int> improved_cols;
     // implicit MV2 order of columns, can be deduced by rows [0,r)
-    MatrixSparseInt MV2(M,MaxMrow);
+    MatrixSparseInt MV2(M);
     int r=0; // next row of MV2 to reduce
     
     // debug
@@ -1555,10 +2059,13 @@ namespace IIA_Internal
     {
       
       // debug
+      if (result->log_debug_time)
+      {
+        timer->cpu_secs(); // iter start
+      }
       if (result->log_debug)
       {
         ++iter;
-        timer->cpu_secs(); // iter start
         result->debug_message("iter %d ",iter);
         if (/* DISABLES CODE */ (0) && iter>max_iter)
         {
@@ -1581,7 +2088,7 @@ namespace IIA_Internal
         if (tied_variables[t.c].size()>1)
         {
           double glo, ghi;
-          compute_tied_goals(t.c, glo, ghi);
+          get_tied_goals(t.c, glo, ghi);
           result->debug_message("tied goals [%g, %g]\n", glo, ghi);
         }
         else
@@ -1594,7 +2101,7 @@ namespace IIA_Internal
       if (t.valueA>priority_threshold)
       {
         // debug
-        if (result->log_debug)
+        if (result->log_debug_time)
         {
           timer_0->cpu_secs();
         }
@@ -1603,44 +2110,57 @@ namespace IIA_Internal
         bool give_up=false;
         int smallest_self_block_coeff=numeric_limits<int>::max();
         // does an existing row work?
+        
+        // see if an existing row of MN works?
         {
           blocking_cols.clear();
           int num_block=0;
-          assert(t.c < (int) M.col_rows.size());
-          auto &tc_rows=M.col_rows[t.c];
-          if(tc_rows.empty())
+          auto &tc_rows=MN.col_rows[t.c];
+          if(!tc_rows.empty())
           {
-            give_up=true;
-          }
-          else
-          {
-            for (size_t m : tc_rows )
+            // pick *best* row, not just the first we find that works
+            vector< pair<int,double> > rows_by_quality;
+            for (auto m : tc_rows )
             {
+              queue_rows_by_quality(t.c, dx, MN, m, rows_by_quality);
+            }
+            if (use_best_improvement)
+            {
+              sort( rows_by_quality.begin(), rows_by_quality.end(), bigger_quality);
+            }
+
+            for (auto rq : rows_by_quality)
+            {
+              int m = rq.first;
+              // double q = rq.second
+
               // debug
+              if (result->log_debug_time)
+              {
+                accept_timer->cpu_secs();
+              }
               if (result->log_debug)
               {
                 ++accept_calls;
-                accept_timer->cpu_secs();
               }
-              
+
               //improve_solution
               bool self_block = false;
               int self_block_coeff = 0;
               const bool worked = accept_strict_improvement(Q,
                                                             quality_fn, quality_threshold,
                                                             &constraint_fn, constraint_threshold,
-                                                            t.c, M.rows[m], dx,
+                                                            t.c, MN.rows[m], dx,
                                                             self_block, self_block_coeff, blocking_cols, num_block, improved_cols);
               
               // debug time
-              if (result->log_debug)
+              if (result->log_debug_time)
               {
                 accept_time+=accept_timer->cpu_secs();
               }
               
               if (worked)
               {
-                // don't add blocking_cols to all_blocking_cols_all: we didn't eliminate them, because it wasn't needed.
                 fixed=true;
                 break;
               }
@@ -1661,7 +2181,7 @@ namespace IIA_Internal
         }
         
         // debug
-        if (result->log_debug)
+        if (result->log_debug_time)
         {
           auto t0 = timer_0->cpu_secs();
           time_0+=t0;
@@ -1682,18 +2202,246 @@ namespace IIA_Internal
             result->debug_message("IIA nullspace: It's not possible to improve x%d. Giving up on this variable.\n", t.c);
             rc=false;
           }
-          else if (M.col_rows[t.c].empty())
+          else if (M.col_rows[t.c].empty()) // should we be checking MV2 instead of M?
           {
-            result->debug_message("Variable x%d isn't in any nullspace row, so its impossible to improve!\n",t.c);
+            result->debug_message("Variable x%d isn't in any M nullspace row, so its impossible to improve!\n",t.c);
             rc=false;
           }
           else
           {
-            // Find a nullspace combination that doesn't have the blocking vars in them (either plus or minus)
-            // try up to MaxMrow times, since that's as many variables as we can eliminate
-            // int max_tries = MaxMrow;
-            auto old_num_rows=M.rows.size();
+            auto old_num_rows=MN.rows.size();
+
+            // Add Nullspace to flip sign of blockers
+            // Find a nullspace combination that has the opposite sign for the blocking vars
+            if (use_Nullspace_sumeven_to_flip_sign_of_blocker && !Nullspace.rows.empty())
+            {
+              
+              if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+              {
+                result->info_message("\n\nTrying to %screment x%d\n", (t.dx>0 ? "in" : "de"), t.c);
+                result->info_message("By using a sum-even nullspace row to flip the sign of blocking coeff, for variables in blocking_cols\n");
+              }
+
+
+              int num_block=0;
+              // Should we just step over the rows of M instead of MN?
+              auto &tc_rows=MN.col_rows[t.c];
+              // figure out how to do the best one later
+              for (auto r : tc_rows)
+              {
+                const auto r_val = MN.rows[r].get_val(t.c);
+                // const auto r_sign = (r_val > 0 ? 1 : -1) * t.dx; // sign after row is negated if needed to get sign == dx.
+                
+                if (smallest_self_block_coeff <= abs(r_val))
+                {
+                  // this row has a self-blocking coefficient, try some other row
+                  continue;
+                }
+                // check sign of tc_rows.coeff t.c
+                // find blockers
+                // typedef map<int, pair<int,int> > BlockingCols;
+                // copy row
+                RowSparseInt row(MN.rows[r]); // copy
+                const bool negate_row_r = ((r_val>0) != t.dx>0);
+                if (negate_row_r)
+                {
+                  row.multiply(-1);
+                }
+                // row has the right sign for t.c so that we would add the row to improve solution[t.c]
+                
+                if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                {
+                  result->info_message("Initial MN row %d, with %s sign, ", r, (negate_row_r ? "flipped" : "original"));
+                  row.print_row(result);
+                  result->info_message("Current blocking_cols ");
+                  print_map(blocking_cols);
+                }
+
+                bool try_row = true;
+                // bool progress = false;
+                for (auto &blocking_col : blocking_cols)
+                {
+                  
+                  // 1. see if row has blocking col with coefficient +/-1, compare to sign of blocking_cols i.e. first and second
+                  // 2. if so search Nullspace for a vector with a "2" coeff for that blocker
+                  // to do: figure out what to do if it changes the coeff of other blockers
+                  //   add it to copy
+                  //   see if it works
+                  //   if not, does it also block with coeff +1? then we need to eliminate it.
+                  //     otherwise, some other blocker has a bad coeff. That's the one we need to eliminate, not this one.
+
+                  // 1.
+                  int bc = blocking_col.first;
+                  
+                  auto bc_val = row.get_val(bc);
+                  if (bc_val == 0)
+                  {
+                    continue; // blocker not in row, we're already good wrt this variable
+                  }
+                  if (abs(bc_val) % 2==0) // coefficient is even
+                  {
+                    // to do, indicate we want to add to make the coefficient zero
+                    // or just deal with this during the Gaussian elimination phase
+                    try_row = false;
+                    continue;
+                  }
+                  // to do, generalize to look for any combo of 1 and 2 coefficients
+                  // for now, just work on the coeff == 1 case
+                  // e.g. we could also try to fix bc_val = -3, etc
+                  if ( abs(bc_val)!=1 )
+                  {
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message("Only bc_val == 1 or -1 is implemented currently. bc_val %d unsupported, skipping\n",bc_val);
+                    }
+                    try_row = false;
+                    continue;
+                  }
+
+                  int bc_r_sign = bc_val > 0 ? 1 : -1;
+                  auto block_neg = blocking_col.second.first;
+                  auto block_pos = blocking_col.second.second;
+                  // blocked in both directions? give up on r
+                  if (block_neg == -1 && block_pos == 1)
+                  {
+                    // row has a blocker that we must eliminate for any chance of success
+                    try_row = false;
+                    // but keep trying to flip the sign of other blockers, so elimination will work on row
+                    continue;
+                  }
+
+                  // do we want to add (true) or subtract (false) 2*nullspacerow to row?
+                  try_row = true;
+                  bool want_add_two = true;
+                  if (block_neg == bc_r_sign)
+                  {
+                    want_add_two = true;
+                  }
+                  else if (block_pos == bc_r_sign)
+                  {
+                    want_add_two = false; // want to subtract 2
+                  }
+                  else
+                  {
+                    // block_pos or neg magnitude is greater than 1
+                    // OK to try row without doing anything to this bc in row
+                    continue;
+                  }
+                  
+                  // 2.
+                  // check rows in nullspace containing variable bc
+                  assert(try_row);
+                  try_row = false;
+                  const auto &bc_rows = Nullspace.col_rows[bc];
+                  for (int rN : bc_rows)
+                  {
+
+                    auto &Nrow = Nullspace.rows[rN];
+                    int rN_bc_val = Nrow.get_val(bc);
+                    // want a 2 for the blocking col, and a zero for t.c
+                    if ( abs(rN_bc_val) != 2 || Nrow.get_val(t.c)!=0)
+                    {
+                      continue; // try the next row
+                    }
+                    bool rN_bc_pos = (rN_bc_val>0);
+                    int mult = (want_add_two == rN_bc_pos) ? 1 : -1;
+
+                    // debug
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message("Flipping sign of blocking col %dx%d in ", bc_val, bc);
+                      row.print_row(result);
+                      result->info_message(" by adding %d times ", mult);
+                      Nrow.print_row(result);
+                    }
+                    
+                    Nullspace.row_r_add_ms(row, mult, Nrow);
+                    // to do
+                    // Research
+                    //   adding Nrow can make row worse, by adding more blocking cols, or making their coefficients worse
+                    //   need a strategy for evaluating if it is worse and going back to original row if things are bad,
+                    //   try various combinations of rows, etc.
+                    //   could be complicated
+                    
+                    
+                    // debug
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message(" to get ");
+                      row.print_row(result);
+                      result->info_message("\n");
+                    }
+
+                    // did it work?
+                    const auto new_bc_val = row.get_val(bc);
+                    if (new_bc_val>0)
+                    {
+                      assert(new_bc_val < block_pos);
+                    }
+                    else
+                    {
+                      assert(new_bc_val > block_neg);
+                    }
+                    assert( row.get_val(bc) == -bc_r_sign );
+                    try_row = true;
+                    break;
+                  }
+                  if (!try_row)
+                  {
+                    break;
+                  }
+                } // for blocking_col
+
+                if (try_row)
+                {
+                  if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                  {
+                    result->info_message("Trying ");
+                    row.print_row(result);
+                  }
+
+                  // try to improve solution using row
+                  bool self_block = false;
+                  int self_block_coeff = 0;
+                  const bool worked = accept_strict_improvement(Q,
+                                                                quality_fn, quality_threshold,
+                                                                &constraint_fn, constraint_threshold,
+                                                                t.c, row, dx,
+                                                                self_block, self_block_coeff, blocking_cols, num_block, improved_cols);
+                  if (worked)
+                  {
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message("debug_Nullspace_sumeven_to_flip_sign_of_blocker worked :-O\n\n");
+                    }
+                    fixed = true;
+                    break;
+                  }
+                  else
+                  {
+                    if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+                    {
+                      result->info_message("failed, I'll try another row if any :-(\n\n");
+                    }
+                  }
+                }
+                
+              } // for r
+              if (debug_Nullspace_sumeven_to_flip_sign_of_blocker)
+              {
+                result->info_message("Moving on.\n\n");
+              }
+
+            }
             
+            
+            
+            // Gaussian elim approach
+            if (!fixed)
+            {
+            // Find a nullspace combination that doesn't have the blocking vars in them (either plus or minus)
+            // try up to M.rows.size() times, since that's as many variables as we can eliminate
+            // int max_tries = M.rows.size();
             do
             {
               int unblocked_row=-1;
@@ -1701,7 +2449,7 @@ namespace IIA_Internal
               
               if (worked)
               {
-                RowSparseInt R=MV2.rows[unblocked_row]; // overwrites
+                const RowSparseInt &R = MV2.rows[unblocked_row];
                 
                 // debug
                 if (result->log_debug)
@@ -1722,7 +2470,7 @@ namespace IIA_Internal
                                               t.c, R, dx,
                                               self_block, self_block_coeff, blocking_cols, num_block, improved_cols))
                 {
-                  M.push_row(R);
+                  MN.push_row(R);
                   fixed=true;
                 }
                 else
@@ -1748,9 +2496,8 @@ namespace IIA_Internal
                       result->debug_message("  Giving up! blocking_cols size=%d didn't increase.\n", (int)new_size);
                       give_up=true;
                       
-                      // save the row for fine_tune
-                      // this doesn't do anything with the columns
-                      N.rows.push_back(R);
+                      // save the row for fine_tune, and future iterations
+                      MN.push_row(R); // zzyk is this actually helpful?
                     }
                   }
                 }
@@ -1776,6 +2523,7 @@ namespace IIA_Internal
                 give_up=true;
               }
             } while (!fixed && !give_up);
+            }
             
             if (!fixed)
             {
@@ -1796,7 +2544,7 @@ namespace IIA_Internal
             // debug
             if (result->log_debug)
             {
-              size_t num_new_rows = M.rows.size() - old_num_rows;
+              size_t num_new_rows = MN.rows.size() - old_num_rows;
               result->debug_message("IIA: nullspace: %lu rows added; was %lu, now %lu.\n",
                                     (unsigned long) num_new_rows,
                                     (unsigned long) old_num_rows,
@@ -1806,10 +2554,10 @@ namespace IIA_Internal
                 result->info_message("improve old last row + new rows\n");
                 const size_t i_start = (old_num_rows>0 ? old_num_rows-1 : 0);
                 
-                for (size_t i = i_start; i<M.rows.size(); ++i)
+                for (size_t i = i_start; i<MN.rows.size(); ++i)
                 {
                   result->debug_message("row %d ",(int)i);
-                  M.rows[i].print_row(result);
+                  MN.rows[i].print_row(result);
                 }
               }
               result->debug_message("Blocking x columns = ");
@@ -1830,19 +2578,13 @@ namespace IIA_Internal
         } // !fixed
         
         // debug
-        if (result->log_debug)
+        if (result->log_debug_time)
         {
           time_1 += timer_1->cpu_secs();
           double iter_time = timer->cpu_secs(); // iter end
-          ++num_iter;
           if (fixed)
           {
             time_improve+=iter_time;
-            ++num_useful;
-            if (num_useful<num_iter)
-            {
-              ++num_useful_after_wasted;
-            }
           }
           else
           {
@@ -1851,6 +2593,18 @@ namespace IIA_Internal
               time_first_wasted=time_improve+time_wasted;
             }
             time_wasted+=iter_time;
+          }
+        }
+        if (result->log_debug)
+        {
+          ++num_iter;
+          if (fixed)
+          {
+            ++num_useful;
+            if (num_useful<num_iter)
+            {
+              ++num_useful_after_wasted;
+            }
           }
         }
         // debug
@@ -1866,10 +2620,9 @@ namespace IIA_Internal
     
     // debug
     // time on wasted iterations?
-    if (result->log_debug)
+    result->debug_message( "Return code rc %d\n",rc);
+    if (result->log_debug && result->log_debug_time)
     {
-      result->debug_message( "Return code rc %d\n",rc);
-      
       auto total_time = (time_wasted+time_improve);
       auto time_after_first_waste = total_time - time_first_wasted;
       if (time_first_wasted==-1.)
@@ -1891,7 +2644,50 @@ namespace IIA_Internal
       }
       result->debug_message("section 0 time %f (%f fixed, %f not), section 1 time %f\n",time_0, time_0f, time_0not, time_1);
       result->debug_message("section 0 accept_strict calls %lu, time %f\n",accept_calls,accept_time);
-      result->debug_message("number of rows: start %lu, end %lu\n", M_rows_init, M.rows.size() );
+      result->debug_message("number of rows: start %lu, end %lu\n", MN_rows_init, MN.rows.size() );
+      delete timer;
+      delete timer_0;
+      delete timer_1;
+      delete accept_timer;
+    }
+    if (result->log_debug)
+    {
+      const int num_wasted = num_iter-num_useful;
+      if (num_wasted==0)
+      {
+        result->debug_message( "Improve solution, %d useful iterations (100 percent)\n",num_iter);
+      }
+      else
+      {
+        result->debug_message("Improve solution %d wasted iterations, %d useful iterations. %d on useful iterations before first failure, %d useful iterations after.\n",
+                              num_wasted,
+                              num_useful,
+                              num_useful-num_useful_after_wasted,
+                              num_useful_after_wasted
+                              );
+      }
+      result->debug_message("section 0 accept_strict calls %lu\n",accept_calls);
+      result->debug_message("number of rows: start %lu, end %lu\n", MN_rows_init, MN.rows.size() );
+    }
+    else if (result->log_debug_time)
+    {
+      auto total_time = (time_wasted+time_improve);
+      auto time_after_first_waste = total_time - time_first_wasted;
+      if (time_first_wasted==-1.)
+      {
+        result->debug_message( "Improve solution, time = %f (100 percent)\n", total_time);
+      }
+      else
+      {
+        result->debug_message("Improve solution wasted iterations = %f (%f percent), useful iterations = %f (%f percent). time  %f (%f percent) on useful iterations before first failure, useful iterations after. total time %f (%f percent) after.\n",
+                              time_wasted, time_wasted*100. / total_time ,
+                              time_improve, time_improve*100. / total_time,
+                              time_first_wasted, time_first_wasted*100. / total_time,
+                              time_after_first_waste, time_after_first_waste*100. / total_time
+                              );
+      }
+      result->debug_message("section 0 time %f (%f fixed, %f not), section 1 time %f\n",time_0, time_0f, time_0not, time_1);
+      result->debug_message("section 0 accept_strict calls, time %f\n", accept_time);
       delete timer;
       delete timer_0;
       delete timer_1;
@@ -1919,63 +2715,82 @@ namespace IIA_Internal
     
   }
   
-  void IncrementalIntervalAssignment::compute_quality_ratio(vector<QElement> &q, vector<int> &cols)
+  
+  double IncrementalIntervalAssignment::get_R(int c, int &x, double &glo, double &ghi) const
+  {
+    get_tied_goals(c,glo,ghi);
+    x = get_solution(c);
+
+    if (glo==0)
+    {
+      return 0.;
+    }
+    else
+    {
+      if (x<=0)
+      {
+        const auto R1lo = glo<1 ? 1/glo : glo;
+        const auto R1hi = ghi<1 ? 1/ghi : ghi;
+        const auto R1 = std::max(R1lo,R1hi);
+        return 1000.*(2-x)*R1;
+      }
+      if (x<=glo)
+      {
+        return ghi/x; // >= glo/x
+      }
+      else if (x>=ghi)
+      {
+        return x/glo; // >= x/glo
+      }
+      // glo < x < ghi
+      else
+      {
+        return std::max( x/glo, ghi/x );
+      }
+    }
+  }
+
+  void IncrementalIntervalAssignment::compute_quality_ratio(vector<QElement> &q, const vector<int> &cols) const
   {
     SetValuesRatio fn;
     q.clear();
     q.reserve( cols.size()*2 );
+    double glo, ghi;
     for (auto c : cols)
     {
-      double glo, ghi;
-      // hi
-      if (compute_tied_goals(c,glo,ghi))
+      // tied, set to worse of ghi and glo
+      if (get_tied_goals(c,glo,ghi))
       {
-        q.emplace_back();
-        auto &qe = q.back();
-        qe.c = c;
-        qe.solution = col_solution[c];
-        qe.solution_set = true;
-        fn.set_values_goal(*this,ghi,qe);
+        // hi
+        QElement qhi;
+        qhi.c = c;
+        qhi.solution = col_solution[c];
+        qhi.solution_set = true;
+        // lo
+        QElement qlo(qhi);
+
+        fn.set_values_goal(*this,ghi,qhi);
+        fn.set_values_goal(*this,glo,qlo);
+        
+        // assign the larger value
+        q.push_back( qlo<qhi ? qhi : qlo );
       }
-      // lo
+      // not tied, lo==hi
+      else
       {
+        assert(glo==ghi);
         q.emplace_back();
         auto &qe = q.back();
         qe.c = c;
         qe.solution = col_solution[c];
         qe.solution_set = true;
-        fn.set_values_goal(*this,glo,q.back());
+        fn.set_values_goal(*this,glo,qe);
       }
     }
     sort(q.begin(),q.end());
   }
   
-  bool is_better( vector<QElement> &qA, vector<QElement> &qB)
-  {
-    // true if A<B by lexicographic min max
-    //   true if A[i]<B[i] for some i and A[j]<=B[j] for all j>i
-    
-    assert(qA.size()==qB.size());
-    if (qA.empty())
-      return false;
-    
-    // start at back, largest element
-    for (int i = (int) qA.size()-1; i>=0; --i)
-    {
-      if (qA[i] < qB[i])
-      {
-        return true;
-      }
-      else if (qB[i] < qA[i])
-      {
-        return false;
-      }
-    }
-    // every element was equal
-    return false;
-  }
-  
-  bool IncrementalIntervalAssignment::increment_solution(RowSparseInt &R, int dx)
+  bool IncrementalIntervalAssignment::increment_solution(const RowSparseInt &R, int dx)
   {
     bool rc=true;
     for (size_t i = 0; i < R.cols.size(); ++i)
@@ -1991,12 +2806,12 @@ namespace IIA_Internal
     return rc;
   }
   
-  void IncrementalIntervalAssignment::fine_tune(MatrixSparseInt&M, MatrixSparseInt&N)
+  void IncrementalIntervalAssignment::fine_tune(const MatrixSparseInt&MN)
   {
     // see if any row of M will improve the lexicographic min-max of the deviations
     
     // while there was improvement
-    //   iterate over rows of M and N
+    //   iterate over rows of MN
     //     try updating the solution by +/- the row
     //       compare lex quality of the row columns before and after
     //       if better, even if not strictly better, then accept the increment
@@ -2012,10 +2827,10 @@ namespace IIA_Internal
     do
     {
       improved = false;
-      auto maxr = M.rows.size() + N.rows.size();
+      const auto maxr = MN.rows.size();
       for (size_t i = 0; i < maxr; ++i)
       {
-        RowSparseInt &R = (i < M.rows.size() ? M.rows[i] : N.rows[i-M.rows.size()]);
+        const RowSparseInt &R = MN.rows[i];
         
         // get vector of current quality
         compute_quality_ratio(qold,R.cols);
@@ -2024,10 +2839,10 @@ namespace IIA_Internal
         if (increment_solution(R,1))
         {
           compute_quality_ratio(qnew,R.cols);
-          if (is_better(qnew,qold))
+          if (1==is_better(qnew,qold))
           {
             improved = true;
-            //          result->info_message("fine tune made an improvement using row %ul = ", (unsigned int) i);
+            //          result->info_message("fine tune made an improvement using row %lu = ", (unsigned int) i);
             //          R.print_row(result);
             continue;
           }
@@ -2037,10 +2852,10 @@ namespace IIA_Internal
         if (increment_solution(R,-2))
         {
           compute_quality_ratio(qnew,R.cols);
-          if (is_better(qnew,qold))
+          if (1==is_better(qnew,qold))
           {
             improved = true;
-            //          result->info_message("fine tune made an improvement using row %ul = ", (unsigned int) i);
+            //          result->info_message("fine tune made an improvement using row %lu = ", (unsigned int) i);
             //          R.print_row(result);
             continue;
           }
@@ -2153,46 +2968,6 @@ namespace IIA_Internal
     return cols_fail.empty() ? true : false;
   }
   
-  bool IncrementalIntervalAssignment::assign_dependent_vars(const vector<int>&cols_dep,
-                                                            const vector<int>&rows_dep,
-                                                            vector<int>&cols_fail)
-  {
-    assert(cols_dep.size()==rows_dep.size());
-    bool OK=true;
-    for (size_t i = 0; i < rows_dep.size(); ++i)
-    {
-      auto col_dep = cols_dep[i];
-      col_solution[col_dep]=0;
-      auto r = rows_dep[i];
-      int sum = row_sum(r);
-      int coeff_dep = rows[r].get_val(col_dep);
-      col_solution[col_dep] = -sum / coeff_dep;
-      if (sum % coeff_dep != 0)
-      {
-        // we have a problem, the dependent var value is not integer (its coeff_dep is not 1)
-        OK=false;
-        ++col_solution[col_dep];
-        cols_fail.push_back(col_dep);
-        result->debug_message("IIA dependent var x%d = %d/%d != integer. Rounding up.\n",
-                              col_dep, -sum, coeff_dep);
-      }
-      result->debug_message("IIA Assigning dependent var x%d = %d/%d = %d%s\n",
-                            col_dep, -sum, coeff_dep, col_solution[col_dep],
-                            (col_solution[col_dep]<col_lower_bounds[col_dep] || col_solution[col_dep]>col_solution[col_dep]) ? " out of bounds!" : "");
-    }
-    if (result->log_debug)
-    {
-      print_solution("after assigning dependent variables");
-      if (!cols_fail.empty())
-      {
-        result->info_message("failed-to-assign variables, cols_fail A");
-        print_vec(result, cols_fail);
-      }
-    }
-    
-    return OK;
-  }
-  
   bool IncrementalIntervalAssignment::generate_tied_data()
   {
     if (!has_tied_variables)
@@ -2264,7 +3039,13 @@ namespace IIA_Internal
     }
     return cols_fail.empty();
   }
-  
+
+  void MatrixSparseInt::row_simplify(int r)
+  {
+    auto &v = rows[r].vals;
+    row_simplify_vals(v);
+  }
+
   void IncrementalIntervalAssignment::row_simplify(int r)
   {
     auto &v = rows[r].vals;
@@ -2288,7 +3069,11 @@ namespace IIA_Internal
                                                        int &MaxMrow)
   {
     // M is #independent_vars rows, by #variables columns
-    M.rows.resize(cols_ind.size());
+    // these two lines are only used if we are trying to append to an existing nullspace
+    // auto Mrow = M.rows.size();
+    // const auto MrowStart = Mrow;
+    size_t Mrow = 0;
+    M.rows.resize(Mrow + cols_ind.size());
     M.col_rows.resize(cols_dep.size()+cols_ind.size());
     
     // calculate least-common-multiple of the diagonal coefficients
@@ -2305,20 +3090,21 @@ namespace IIA_Internal
       L=lcm(L,v);
     }
     
-    result->debug_message("creating nullspace\n");
+    result->debug_message("creating nullspace starting in row %d\n",(int)Mrow);
     result->debug_message("lcm=%d\n",L);
     
     if (L==0)
       return false;
     
-    for (size_t i = 0; i < cols_ind.size(); ++i)
+    for (size_t i = 0; i < cols_ind.size(); ++i, ++Mrow)
     {
-      // i is both the index into cols_ind, and the row of M we are filling in
+      // i is the index into cols_ind
+      // Mrow is the row of M we are filling in
       
       // c = column of this we are turning into a row vector of the nullspace
       auto c = cols_ind[i];
       
-      auto &row = M.rows[i];
+      auto &row = M.rows[Mrow];
       
       // result->info_message("Filling in row %d from matrix column %d\n",(int)i,c);
       // grab the entries for the independent vars
@@ -2363,6 +3149,20 @@ namespace IIA_Internal
       row_simplify_vals(row.vals);
       // result->info_message("after simplify "); row.print_row(result);
       // result->info_message("\n");
+      
+//      // if it is identical to a passed-in vector, then erase it
+//      for (int m = 0; m < MrowStart; ++m)
+//      {
+//        if (row.cols == M.rows[m].cols && row.vals == M.rows[m].vals)
+//        {
+//          result->debug_message("Clearing identical row %d because it is the same as passed-in row %d\n",Mrow,m);
+//          row.cols.clear();
+//          row.vals.clear();
+//          --Mrow;
+//          M.rows.resize( M.rows.size()-1 );
+//          break;
+//        }
+//      }
     }
     M.fill_in_cols_from_rows();
     MaxMrow=(int)M.rows.size();
@@ -2561,7 +3361,7 @@ namespace IIA_Internal
     
     // it is the only blocker in a row, i.e. its row is diagonal and not rref, so remove that row from the ones that are reduced
     --r;
-    matrix_row_swap(r,rr);
+    row_swap(r,rr);
   }
   
   bool MatrixSparseInt::gaussian_elimination(int col, const BlockingCols &blocking_cols, int max_coeff, map<int,int> &improved_cols,
@@ -2779,7 +3579,7 @@ namespace IIA_Internal
         result->debug_message("matrix_row_eliminate using row %d to kill col %d\n",rr, lead);
         
         // pivot
-        matrix_row_swap(rr,r);
+        row_swap(rr,r);
         
         matrix_allrows_eliminate_column(r, lead);
         
@@ -3059,8 +3859,7 @@ namespace IIA_Internal
     }
     return vals;
   }
-  
-  
+    
   // For an explanation of Reduced Row Echelon Form, see
   // https://people.sc.fsu.edu/~jburkardt/c_src/row_echelon_integer/row_echelon_integer.html
   //
@@ -3084,18 +3883,12 @@ namespace IIA_Internal
     rref_col_order.push_back(c);
     
     // eliminate c from all other rows
-    matrix_allrows_eliminate_column(r,c,&rhs); // plus also update the rhs
+    allrows_eliminate_column(r,c); // plus also update the rhs
     
     // ensure c coefficient is positive, not negative (e.g. 1, not -1)
     if (rows[r].get_val(c)<0)
     {
-      // negate
-      for (auto &v : rows[r].vals)
-      {
-        v = -v;
-      }
-      rhs[r]=-rhs[r];
-      // print_problem("RREF post negating row " +to_string(r) + " to make column " + to_string(c) + " entry positive ");
+      row_negate(r);
     }
     
     // next row
@@ -3118,6 +3911,27 @@ namespace IIA_Internal
     return true;
   }
   
+  void RowSparseInt::sparse_to_full(vector<int> &full) const
+  {
+    if (!cols.empty() && cols.back() >= full.size())
+    {
+      full.resize(cols.back()+1);
+    }
+    int j = 0;
+    for (int c=0; c<full.size(); ++c)
+    {
+      if (j<cols.size() && cols[j] == c)
+      {
+        full[c] = vals[j];
+        ++j;
+      }
+      else
+      {
+        full[c] = 0;
+      }
+    }
+  }
+
   int RowSparseInt::get_col_index(int c) const
   {
     for (int i=0; i<(int)cols.size(); ++i)
@@ -3207,16 +4021,20 @@ namespace IIA_Internal
   }
 
   
-  bool IncrementalIntervalAssignment::rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map)
+  bool IncrementalIntervalAssignment::rref_step1(int &rref_r, vector<int> &rref_col_order, vector<int> &rref_col_map, bool map_only_phase)
   {
     if (rref_r>used_row)
       return true;
     
     result->debug_message("rref_step1\n");
     
-    SetValuesCoeffRowsGoal val_CoeffRowsGoal_Q;
+    SetValuesCoeffRowsGoal val_CoeffRowsGoal_Q; // map_only_phase
+    SetValuesCoeffRGoal val_CoeffRGoal_Q; // even phase
     QWithReplacement Q(this, val_CoeffRowsGoal_Q, numeric_limits<double>::lowest()/4);
-
+    if (use_better_rref_step1_pivots_in_sumeven_phase && !map_only_phase) // zzyk, test doing this in the map_only_phase as well
+    {
+      Q.set_val_fn(val_CoeffRGoal_Q);
+    }
     vector<int>all_vars;
     all_vars.reserve(used_col+1);
     for (int c=0; c<=used_col; ++c)
@@ -3232,6 +4050,7 @@ namespace IIA_Internal
     for (;;)
     {
       Q.build(all_vars);
+      // Q.print(); zzyk
       
       if (Q.empty())
         return true;
@@ -3563,7 +4382,7 @@ namespace IIA_Internal
     return true;
   }
   
-  bool IncrementalIntervalAssignment::rref_constraints(vector<int> &rref_col_order)
+  bool IncrementalIntervalAssignment::rref_constraints(vector<int> &rref_col_order, bool map_only_phase)
   {
     // rref data
     // col_order is implicit order of columns, the sequence in which rref eliminated them
@@ -3587,7 +4406,7 @@ namespace IIA_Internal
     
     // Step 1
     // Use any var that has a "1" for a coefficient in a row, prefering those with fewer rows
-    if (!rref_step1(rref_r, rref_col_order, rref_col_map))
+    if (!rref_step1(rref_r, rref_col_order, rref_col_map, map_only_phase))
       return false;
     
     // Step 2
@@ -3603,7 +4422,7 @@ namespace IIA_Internal
     
     return true;
   }
-  
+   
   bool IncrementalIntervalAssignment::rref_improve(vector<int> &rref_col_order)
   {
     // rref data
@@ -3643,7 +4462,7 @@ namespace IIA_Internal
                    back_inserter(rsc));
   }
   
-  void MatrixSparseInt::matrix_row_swap(int r, int s)
+  void MatrixSparseInt::row_swap(int r, int s)
   {
     if (r==s)
       return;
@@ -3681,7 +4500,7 @@ namespace IIA_Internal
       return;
     
     // swap rows
-    matrix_row_swap(r,s);
+    MatrixSparseInt::row_swap(r,s);
     
     swap(rhs[r],rhs[s]);
     swap(constraint[r],constraint[s]);
@@ -3692,7 +4511,7 @@ namespace IIA_Internal
       swap(parentRows[r],parentRows[s]);
     }
   }
-  
+
   void MatrixSparseInt::matrix_allrows_eliminate_column(int r, int c, vector<int> *rhs)
   {
     // eliminate c from other rows, except r
@@ -3940,7 +4759,7 @@ namespace IIA_Internal
     multiply_rhs(r,s,u,v);
   }
   
-  void MatrixSparseInt::transpose(MatrixSparseInt &T,  size_t num_rows, size_t num_cols)
+  void MatrixSparseInt::transpose(MatrixSparseInt &T,  size_t num_rows, size_t num_cols) const
   {
     T.col_rows.clear();
     T.rows.clear();
@@ -3986,8 +4805,9 @@ namespace IIA_Internal
       I.col_rows[i].push_back((int)i);
     }
   }
-  
-  bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order)
+
+  bool IncrementalIntervalAssignment::HNF(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order,
+                                          vector<int> &g)
   {
     if (result->log_debug)
     {
@@ -3995,6 +4815,83 @@ namespace IIA_Internal
       print_problem("Trying HNF on this");
     }
     
+    if (result->log_debug)
+    {
+      result->debug_message("IIA starting HNF\n");
+      print_problem("Trying HNF on this");
+    }
+    
+    // Reduce to only the non-zero rows, as RREF may have removed some redundant constraints from the end
+    int r(used_row);
+    while (r>-1 && rows[r].cols.empty())
+    {
+      --r;
+    }
+    // no constraints, set any solution we want!
+    if (r==-1)
+    {
+      // col_solution is already assigned
+      assert( col_solution == g );
+      return true;
+    }
+    const int this_rows = r+1; // m
+    
+    // Reduce to non-zero columns
+    int c(used_col);
+    while(c>-1 && col_rows[c].empty())
+    {
+      // col_solution[c] is arbitrary, as it's in no constraints
+      // col_solution[c]=g[c]; // already assigned,
+      --c;
+    }
+    const int this_cols = used_col+1; // n
+    
+    return MatrixSparseInt::HNF(this_rows, this_cols, B, U, hnf_col_order, g, use_HNF_goals);
+  }
+
+  void MatrixSparseInt::nonzero(int &r, int &c) const
+  {
+    r = (int) rows.size(); --r;
+    while (r>-1 && rows[r].cols.empty())
+    {
+      --r;
+    }
+
+    c = (int) col_rows.size(); --c;
+    while(c>-1 && col_rows[c].empty())
+    {
+      --c;
+    }
+  }
+
+  bool check_inverse(const MatrixSparseInt &U, const MatrixSparseInt &Uinv)
+  {
+    // check U * Uinv == I
+    MatrixSparseInt UinvT(Uinv.result);
+    Uinv.transpose(UinvT);
+    vector<int> UinvColr(U.rows.size(),0), er(U.rows.size(),0);
+    for (int r=0; r<U.rows.size(); ++r)
+    {
+      // col r of Uinv == row r of UinvT
+      UinvT.rows[r].sparse_to_full(UinvColr);
+      U.multiply(UinvColr, er);
+      // er should be elementary vector with 1 in position r
+      if (er[r]!=1)
+        return false;
+      for (int rr=0; rr<er.size(); ++rr)
+      {
+        if (rr!=r && er[rr]!=0)
+        {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  bool MatrixSparseInt::HNF(int this_rows, int this_cols, MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order, vector<int> &g, bool use_HNF_goals) const
+  {
+
     // Description of HNF Hermite Normal Form and why it is what we want to do
     // http://sites.math.rutgers.edu/~sk1233/courses/ANT-F14/lec3.pdf
     // http://sites.math.rutgers.edu/~sk1233/courses/ANT-F14/lec4.pdf
@@ -4005,31 +4902,16 @@ namespace IIA_Internal
     // Write all comments as if we are doing column operations, to make it easier to follow, but "IMP" describes what that translates to in our implementation
     
     // Copy this to B.  IMP copy this^T to B
-    // Reduce to only the non-zero rows, as RREF may have removed some redundant constraints from the end
-    int r(used_row);
-    while (r>-1 && rows[r].cols.empty())
-    {
-      --r;
-    }
-    // no constraints, set any solution we want!
-    if (r==-1)
-    {
-      col_solution.assign(col_solution.size(),0);
-      return true;
-    }
-    const size_t this_rows = (size_t) r+1; // m
-                                           // Reduce to non-zero columns
-    int c(used_col);
-    while(c>-1 && col_rows[c].empty())
-    {
-      col_solution[c]=0; // arbitrary, it's in no constraints
-      --c;
-    }
-    const size_t this_cols = (size_t) used_col+1; // n
-                                                  // B = This.  IMP B = This^T
-                                                  // U = I
+    // B = This.  IMP B = This^T
+    // U = I
+    
+    const bool debug_HNF(false);
+    
     transpose(B, this_rows, this_cols);
     identity(U, this_cols);
+    // debug
+    MatrixSparseInt UinvT(U);
+    identity(UinvT, this_cols);
     
     hnf_col_order.resize(this_cols);
     iota(hnf_col_order.begin(),hnf_col_order.end(),0);
@@ -4039,8 +4921,13 @@ namespace IIA_Internal
     {
       B.print_matrix("HNF B initial");
       U.print_matrix("HNF U initial");
+      UinvT.print_matrix("HNF UinvT initial");
+      MatrixSparseInt Uinv(UinvT);
+      UinvT.transpose(Uinv);
+      assert( check_inverse(U,Uinv) );
       result->info_message("HNF column order initial");
       print_vec(result, hnf_col_order);
+      // result->info_message("HNF U^{-1}g initial"); print_vec(result, g);
     }
     
     // zzyk to do, if needed
@@ -4078,13 +4965,25 @@ namespace IIA_Internal
           {
             vv = -vv;
           }
+          // negate UinvT row == negate Uinv column
+          for (auto &vv : UinvT.rows[br].vals)
+          {
+            vv = -vv;
+          }
+          // same operation on g
+          // g[br] = -g[br];
         }
         assert(B.rows[br].get_val(hnf_c) >= 0);
       }
-      if (/* DISABLES CODE */ (0))
+      if (/* DISABLES CODE */ (debug_HNF))
       {
         B.print_matrix("HNF B after column hnf_r lower diagonal entries made positive");
         U.print_matrix("HNF U after column hnf_r lower diagonal entries made positive");
+        UinvT.print_matrix("HNF UinvT after column hnf_r lower diagonal entries made positive");
+        MatrixSparseInt Uinv(UinvT);
+        UinvT.transpose(Uinv);
+        assert( check_inverse(U,Uinv) );
+        // result->info_message("HNF U^{-1}g after column hnf_r lower diagonal entries made positive"); print_vec(result, g);
       }
       
       
@@ -4133,8 +5032,14 @@ namespace IIA_Internal
           int v = B.rows[br].get_val(hnf_r);
           assert(v!=0);
           int m = v / small_v; // integer
+          // row[br] := row[br] - m * row[small_r]
           B.matrix_row_us_minus_vr(small_r, br, 1, m);
           U.matrix_row_us_minus_vr(small_r, br, 1, m);
+          // Uinv  row br += m row small_r
+          // UinvT row small_r += m row br
+          UinvT.matrix_row_us_minus_vr(br, small_r, 1, -m);
+          // g := U^{-1}g, where for Uinv use +m
+          // g[br] += m*g[small_r]; // ?? applied in wrong order, need to do UinvTT.multiply(g,e)
           if (v % small_v == 0)
           {
             assert( B.rows[br].get_val(hnf_r) == 0);
@@ -4162,11 +5067,16 @@ namespace IIA_Internal
         
       } while (extra_nonzeros);
       
-      if (/* DISABLES CODE */ (0))
+      if (/* DISABLES CODE */ (debug_HNF))
       {
         result->debug_message("done reducing hnf_r %d hnf_c %d\n",hnf_r,hnf_c);
         B.print_matrix("HNF B after reducing hnf_r");
         U.print_matrix("HNF U after reducing hnf_r");
+        UinvT.print_matrix("HNF UinvT after reducing hnf_r");
+        MatrixSparseInt Uinv(UinvT);
+        UinvT.transpose(Uinv);
+        assert( check_inverse(U,Uinv) );
+        // result->info_message("HNF U^{-1}g after reducing hnf_r"); print_vec(result, g);
       }
       
       if (small_r==-1)
@@ -4177,15 +5087,28 @@ namespace IIA_Internal
       }
       
       // swap small_r into hnf_r
-      B.matrix_row_swap(small_r,hnf_r);
-      U.matrix_row_swap(small_r,hnf_r);
-      swap(hnf_col_order[small_r], hnf_col_order[hnf_r]);
+      if (small_r != hnf_r)
+      {
+        B.row_swap(small_r,hnf_r);
+        U.row_swap(small_r,hnf_r);
+        
+        // swap cols of Uinv == swap rows of UinvT == swap g entries
+        UinvT.row_swap(small_r,hnf_r);
+        // swap(g[small_r],g[hnf_r]);
+        
+        swap(hnf_col_order[small_r], hnf_col_order[hnf_r]);
+      }
       
-      if (/* DISABLES CODE */ (0))
+      if (/* DISABLES CODE */ (debug_HNF))
       {
         result->debug_message("swapped rows %d and %d after reducing hnf_r %d hnf_c %d\n", small_r, hnf_r, hnf_r, hnf_c);
         B.print_matrix("HNF B after reducing hnf_r");
         U.print_matrix("HNF U after reducing hnf_r");
+        UinvT.print_matrix("HNF UinvT after reducing hnf_r");
+        MatrixSparseInt Uinv(UinvT);
+        UinvT.transpose(Uinv);
+        assert( check_inverse(U,Uinv) );
+        // result->info_message("HNF U^{-1}g after reducing hnf_r"); print_vec(result, g);
       }
       
       ++hnf_c;
@@ -4195,6 +5118,11 @@ namespace IIA_Internal
       result->debug_message("Done reducing column (row) heights\n");
       B.print_matrix("HNF B reduced");
       U.print_matrix("HNF U reduced");
+      UinvT.print_matrix("HNF UinvT reduced");
+      MatrixSparseInt Uinv(UinvT);
+      UinvT.transpose(Uinv);
+      assert( check_inverse(U,Uinv) );
+      // result->info_message("HNF U^{-1}g reduced"); print_vec(result, g);
     }
     
     // Ensure off-diagonal entries are non-negative and smaller than the diagonal for each row
@@ -4230,14 +5158,25 @@ namespace IIA_Internal
         else
           continue;
         
+        // row[rr] := row[rr] - m * row[r]
         B.matrix_row_us_minus_vr(r, rr, 1, m);
         U.matrix_row_us_minus_vr(r, rr, 1, m);
-        
-        if (/* DISABLES CODE */ (0))
+        // for Uinv and g, opposite sign
+        // Uinv  row rr += m row r
+        // UinvT row  r += m row rr
+        UinvT.matrix_row_us_minus_vr(rr, r, 1, -m);
+        // g[rr] += m*g[r]; // ?? wrong order
+
+        if (/* DISABLES CODE */ (0 && debug_HNF))
         {
           result->debug_message("Done ensuring smaller off-diagonals for diagonal of row %d and other row %d\n", r, rr);
           B.print_matrix("HNF B off-diagonals");
           U.print_matrix("HNF U off-diagonals");
+          UinvT.print_matrix("HNF UinvT off-diagonals");
+          MatrixSparseInt Uinv(UinvT);
+          UinvT.transpose(Uinv);
+          assert( check_inverse(U,Uinv) );
+          // result->info_message("HNF U^{-1}g reduced"); print_vec(result, g);
         }
       }
     }
@@ -4247,6 +5186,11 @@ namespace IIA_Internal
       result->debug_message("Done ensuring smaller off-diagonals\n");
       B.print_matrix("HNF B off-diagonals");
       U.print_matrix("HNF U off-diagonals");
+      UinvT.print_matrix("HNF UinvT off-diagonals");
+      MatrixSparseInt Uinv(UinvT);
+      UinvT.transpose(Uinv);
+      assert( check_inverse(U,Uinv) );
+      // result->info_message("HNF U^{-1}g reduced"); print_vec(result, g);
     }
     
     // transpose B and U at end, since we did row operations
@@ -4256,6 +5200,23 @@ namespace IIA_Internal
     swap(BT,B);
     swap(UT,U);
     
+    // UinvT is now just Uinv
+    // apply to g
+    vector<int> gg(g.size(),1.);
+    if (use_HNF_goals)
+    {
+      // use c = Uinv g for independent variables.
+      UinvT.multiply(g, gg);
+    }
+    else
+    {
+      // use c = 1 for independent variables.
+
+    }
+    g.swap(gg);
+    
+
+    
     // debug
     if (result->log_debug)
     {
@@ -4263,6 +5224,9 @@ namespace IIA_Internal
       U.print_matrix("HNF U untransposed final");
       result->info_message("HNF column order final");
       print_vec(result, hnf_col_order);
+      UinvT.print_matrix("HNF Uinv untransposed final");
+      assert( check_inverse(U,UinvT) );
+      result->info_message("HNF U^{-1}g untransposed final"); print_vec(result, g);
     }
     
     // debug
@@ -4305,56 +5269,21 @@ namespace IIA_Internal
         }
       }
     }
+    assert( check_inverse(U,UinvT) );
     
     return true;
   }
-  
-  bool IncrementalIntervalAssignment::HNF_satisfy_constraints(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order)
+
+  bool IncrementalIntervalAssignment::HNF_satisfy_constraints(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order,
+                                                              const vector<int> &g)
   {
-    // Let e = [B^{−1}b, 0, 0, . . . , 0] where e is a vector of length n with first m entries B^{−1}b
-    // If e is integral, then output Uc, else output "no solution"
-    
-    // Solve e = B^{-1}b by back substitution, i.e. find c : Be = b
-    // if there is no solution, return false
-    
-    // multiply e by U,  solution = Ue
-    // verify solution, if good, return true, else return false;
-    
-    vector<int> e(used_col+1,0); // rhs == b
-                                      // cc are the unassigned variables, coming from the redundant constraints
-    
-    // backsub
-    for (int r=0; r< (int)B.rows.size(); ++r)
+    bool OK = HNF_satisfy_rhs(B, U, hnf_col_order,
+                              rhs, col_solution, used_col+1, g);
+    if (!OK)
     {
-      const auto &row = B.rows[r];
-      auto rs = row_sum(row.cols,row.vals,e,rhs[r]);
-      auto coeff = row.get_val(r);
-      if (coeff==0)
-      {
-        e[r]=1;
-      }
-      else if (rs % coeff)
-      {
-        if (result->log_warning)
-          result->warning_message("HNF no integer solution because row_sum[%d] %% coeff[%d] != 0:  %d %% %d = %d\n", r, r, rs, coeff, rs % coeff);
-        return false;
-      }
-      else
-      {
-        e[r] = -rs / coeff;
-      }
+      result->debug_message("HNF, no solution");
+      return false;
     }
-    // The non-diagonal columns of U are nullspace vectors we can add in any linear combination to get the values we want
-    // we can assign these remaining variables to anything we want
-    //   we'd like to pick something that get's us closer to the bounds or goals
-    //   this starts to look like the optimization step, maybe just add the columns of U to the nullspace...
-    for (size_t c=B.rows.size(); c< e.size(); ++c)
-    {
-      e[c] = 1; // 0, 2, whatever
-    }
-    
-    // rhs = Uc
-    U.multiply(e,col_solution);
     
     if (result->log_debug)
     {
@@ -4372,7 +5301,91 @@ namespace IIA_Internal
       print_problem("from original problem");
     }
     
-    return satisfied;
+    return satisfied;    
+  }
+
+  
+  bool IncrementalIntervalAssignment::HNF_satisfy_rhs(MatrixSparseInt &B, MatrixSparseInt &U, vector<int> &hnf_col_order,
+                                                      const vector<int> &rhs, vector<int> &col_solution, int col_size,
+                                                      const vector<int> &g)
+  {
+    // Let e = [B^{−1}b, 0, 0, . . . , 0] where e is a vector of length n with first m entries B^{−1}b
+    // If e is integral, then output Uc, else output "no solution"
+    
+    // Solve e = B^{-1}b by back substitution, i.e. find c : Be = b
+    // if there is no solution, return false
+    
+    // multiply e by U,  solution = Ue
+    // verify solution, if good, return true, else return false;
+    
+    const bool debug_HNF(false);
+
+    vector<int> e(col_size,0); // rhs == b
+                               // cc are the unassigned variables, coming from the redundant constraints
+    
+    // backsub
+    for (int r=0; r< (int)B.rows.size(); ++r)
+    {
+      const auto &row = B.rows[r];
+      auto rs = row_sum(row.cols,row.vals,e,rhs[r]);
+      auto coeff = row.get_val(r);
+      if (coeff==0)
+      {
+        e[r]=1;
+      }
+      else if (rs % coeff)
+      {
+        if (B.result->log_warning)
+          B.result->warning_message("HNF no integer solution because row_sum[%d] %% coeff[%d] != 0:  %d %% %d = %d\n", r, r, rs, coeff, rs % coeff);
+        return false;
+      }
+      else
+      {
+        e[r] = -rs / coeff;
+      }
+    }
+    // zzyk-hnf
+    // set e[c] to be U^{-1}g, where g is the vector of goals
+    
+    // The non-diagonal columns of U are nullspace vectors we can add in any linear combination to get the values we want
+    // we can assign these remaining variables to anything we want
+    //   we'd like to pick something that get's us closer to the bounds or goals
+    //   this starts to look like the optimization step, maybe just add the columns of U to the nullspace...
+    for (size_t c=B.rows.size(); c< e.size(); ++c)
+    {
+      // e[c] can be anything and not affect satisfying the constraints
+      // improvement since IMR paper: assign to goal
+      //   Note whatever transformation of variables HNF did to e was already applied to the goals as well.
+      e[c] = g[c];
+    }
+    
+    if (/* DISABLES CODE */ (debug_HNF))
+    {
+      U.print_matrix("Final U");
+      U.get_result()->info_message("e (y): ");
+      print_vec( U.result, e);
+    }
+    
+    // rhs = Uc
+    // U is empty if there were no constraints. Treat it as identity
+    if (U.rows.empty())
+    {
+      assert(e.size()==col_size);
+      assert(col_solution.size()==col_size);
+      col_solution = e;
+    }
+    else
+    {
+      U.multiply(e,col_solution);
+    }
+
+    if (/* DISABLES CODE */ (debug_HNF))
+    {
+      U.get_result()->info_message("col_solution (x): ");
+      print_vec( U.result, col_solution);
+    }
+
+    return true;
   }
   
   bool IncrementalIntervalAssignment::verify_constraints_satisfied(bool print_me)
@@ -4425,7 +5438,7 @@ namespace IIA_Internal
     return satisfied;
   }
   
-  bool MatrixSparseInt::multiply(const vector<int> &x, vector<int> &y)
+  bool MatrixSparseInt::multiply(const vector<int> &x, vector<int> &y) const
   {
     if (col_rows.size()!=x.size())
     {
@@ -4723,7 +5736,7 @@ namespace IIA_Internal
     // clear current columns
     for (auto &cr : col_rows)
     {
-      // assert(cr.empty()); // it is not empty when we are refilling from cull_nullspace_tied_variables
+      // assert(cr.empty()); // it is not empty when we are refilling from cull_nullspace_tied_variable_rows
       cr.clear();
     }
     
@@ -4829,8 +5842,96 @@ namespace IIA_Internal
       solved_used_col = -1;
     }
   }
-  
-  int IncrementalIntervalAssignment::solve_sub(bool do_improve)
+
+  // verify Ax=b
+  bool MatrixSparseInt::verify_Ax_b(const vector<int> &x, const vector<int> &b) const
+  {
+    // bb = Ax
+    vector<int> bb(rows.size(),0);
+    bool OK = multiply(x, bb);
+    if (!OK)
+    {
+      result->error_message("verify_Ax=b fail, computation failure.");
+      return false;
+    }
+    // b.size == bb.size
+    if (bb.size() != b.size())
+    {
+      result->error_message("verify_Ax=b fail, Ax not the same size as b.");
+      return false;
+    }
+    // b == bb
+    for (int i=0; i<bb.size(); i++)
+    {
+      if (b[i]!=bb[i])
+      {
+        result->error_message("verify_Ax=b fail, b[%d]==%d but Ax[%d]==%d.",i,b[i],i,bb[i]);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  int MatrixSparseInt::lcm_entries() const
+  {
+    int L=1;
+    for (auto &row : rows)
+    {
+      for (auto v : row.vals)
+      {
+        assert(v!=0);
+        L=lcm(L,v);
+      }
+    }
+    return L;
+  }
+
+  void remove_duplicate_rows(const MatrixSparseInt &M, int MaxMrow, MatrixSparseInt &N)
+  {
+    set<int> delete_row;
+    for (int r=0; r<MaxMrow; ++r)
+    {
+      // does row r of M exist in N?
+      auto &mrow = M.rows[r];
+      assert(!mrow.cols.empty());
+      int lead_col = mrow.cols[0];
+      // for rows in N with same leading col
+      for (int s : N.col_rows[lead_col])
+      {
+        if (row_equal(mrow, N.rows[s]))
+        {
+          delete_row.insert(s);
+        }
+      }
+    }
+    if (!delete_row.empty())
+    {
+      // overwrite rows of N
+      auto si = delete_row.begin();
+      int ss = 0; // assign row s to be ss
+      for (int s = 0; s<N.rows.size(); ++s)
+      {
+        if (si!=delete_row.end() && s==*si)
+        {
+          si++;
+          // don't increment ss
+        }
+        else
+        {
+          if (s!=ss)
+          {
+            N.rows[ss]=N.rows[s];
+          }
+          ss++; // ss increments with s
+        }
+      }
+      N.rows.resize(ss);
+      N.fill_in_cols_from_rows();
+    }
+    
+  }
+
+  int IncrementalIntervalAssignment::solve_sub(bool do_improve, bool map_only_phase)
   {
     // solve a subproblem
     //   get row echelon form
@@ -4854,7 +5955,8 @@ namespace IIA_Internal
       }
       
       // remove tied variables from the matrix and replace them with the tied-to variables
-      remove_tied_variables();
+      replace_tied_variables();
+      cull_tied_variables(Nullspace);
       
       // generate the upper/lower bounds/goals for the tied-to variables
       if (!generate_tied_data())
@@ -4902,14 +6004,16 @@ namespace IIA_Internal
       EqualsB Bsave(*this_B);
       
       // row echelon for constraints
-      bool rref_OK = rref_constraints(rref_col_order);
+      bool rref_OK = rref_constraints(rref_col_order,map_only_phase);
       
       // debug
       if (result->log_debug)
       {
         print_problem("solve_sub after RREF constraints",rref_col_order);
         // print_problem_summary("solve_sub after RREF constraints");
-
+      }
+      if (result->log_debug_time)
+      {
         time_rref = timer.cpu_secs();
         result->info_message("rref time %f\n",time_rref);
       }
@@ -4925,13 +6029,16 @@ namespace IIA_Internal
       
       // satisfy constraints using direct back-substitution using the rref, with HNF as backup
       categorize_vars(rref_col_order, cols_dep, cols_ind, rows_dep);
-      const bool is_feasible = satisfy_constaints(cols_dep, cols_ind, rows_dep);
+      const bool is_feasible = satisfy_constraints(cols_dep, cols_ind, rows_dep);
       
       // debug
       // print_problem("solve_sub initial_feasible_solution ");
       if (result->log_debug)
       {
         print_solution("solve_sub initial constraints solution ");
+      }
+      if (result->log_debug_time)
+      {
         time_constrain = timer.cpu_secs();
         result->info_message("feasible constraints solution time %f\n",time_constrain);
       }
@@ -4959,12 +6066,31 @@ namespace IIA_Internal
       
     }
     
+    // research, skip bounds and improve
+    if (satisfy_constraints_only)
+    {
+      if (has_tied_variables)
+      {
+        assign_tied_variables();
+      }
+      if (result->constraints_satisfied)
+      {
+        hasBeenSolved = true;
+      }
+      return result->constraints_satisfied;
+    }
+    // zzyk to do, for large problems, attempt to satisfy bounds and improve solution just using Nullspace, without any rref
+    
     // setup nullspace for improving bounds and quality
     // M is nullspace
     // rows 0..MaxMrow span the nullspace, and beyond that are extra rows that were useful candidate increment vectors
     MatrixSparseInt M(result);
-    int MaxMrow=0; // last row of nullspace M before we augmented it
-    
+    int MaxMrow=0;
+    // MaxMrow is last row of nullspace M before we augmented it
+    // to prepend Nullspace to M, use the following two lines
+    //   MatrixSparseInt &M = Nullspace;
+    //   int MaxMrow=(int) M.rows.size(); // last row of nullspace M before we augmented it
+
     {
       // save original matrix A,b
       MatrixSparseInt *this_matrix = this;
@@ -4986,22 +6112,25 @@ namespace IIA_Internal
         //debug
         
         cols_dep.clear(); cols_ind.clear(); rows_dep.clear();
-        categorize_vars(rref_col_order, cols_dep, cols_ind, rows_dep);
-        
+        categorize_vars(rref_col_order, cols_dep, cols_ind, rows_dep);        
       }
       
-      // nullspace
+      // M nullspace
       create_nullspace(cols_dep, cols_ind, rows_dep, M, MaxMrow);
-      cull_nullspace_tied_variables(M, MaxMrow);
+      cull_nullspace_tied_variable_rows(M, MaxMrow);
       
       // debug
-      if (result->log_debug)
+      if (result->log_debug) // || use_map_nullspace)
       {
-        M.print_matrix("nullspace ");
-        // M.print_matrix_summary("nullspace ");
+        M.print_matrix("M nullspace");
+        // M.print_matrix_summary("M nullspace ");
+        if (use_map_nullspace)
+        {
+          Nullspace.print_matrix("N nullspace");
+          // Nullspace.print_matrix_summary("N nullspace ");
+        }
       }
-      // debug
-
+      
       if (do_restore)
       {
         // restore original matrix, before rref
@@ -5011,10 +6140,18 @@ namespace IIA_Internal
       }
     }
     
+    // MN = concatenate M+Nullspace
+    //   if use_map_nullspace is false, then Nullspace is an empty matrix here and MN==M
+    MatrixSparseInt MN(M,MaxMrow,Nullspace,true);
+    if (result->log_debug && use_map_nullspace)
+    {
+      MN.print_matrix("MN nullspace");
+    }
+    
     bool in_bounds = false;
     
     // normal method
-    in_bounds = satisfy_bounds(M, MaxMrow);
+    in_bounds = satisfy_bounds(M, MN);
     
     // satisfy_bounds with tiny subspace
     //   for all the variables that are out of bounds
@@ -5022,6 +6159,7 @@ namespace IIA_Internal
     //   do the above on it instead
     if (!in_bounds)
     {
+      MatrixSparseInt Mtiny(M);
       bool more_nullspace_rows = false;
       for ( int c = 0; c <= used_col; ++c )
       {
@@ -5033,20 +6171,25 @@ namespace IIA_Internal
             print_problem("stuck problem");
           }
           
-          if (tiny_subspace(c, M))
+          if (tiny_subspace(c, Mtiny, MN))
           {
             more_nullspace_rows = true;
           }
         }
       }
       if (more_nullspace_rows)
-        in_bounds = satisfy_bounds(M, (int) M.rows.size() );
+      {
+        in_bounds = satisfy_bounds(Mtiny, MN);
+      }
     }
     
     // debug
     if (result->log_debug)
     {
       print_solution("solve_sub constraints + bounds solution ");
+    }
+    if (result->log_debug_time)
+    {
       time_bound = timer.cpu_secs();
       result->info_message("feasible bounds solution time %f\n",time_bound);
     }
@@ -5064,23 +6207,31 @@ namespace IIA_Internal
     {
       // redo rref and nullspace if helpful
       //   variables with non-1 coefficients, such as sum-even variables with a coeff of 2, were chosen as independent vars above.
-      //   however, for optimization, we want them to be *depended* variables
+      //   however, for optimization, we want them to be *dependent* variables
       
-      MatrixSparseInt N(result);
-      improve_solution(M, MaxMrow, N);
+      if (/* DISABLES CODE */ (0) && use_map_nullspace)
+      {
+        result->info_message("do_improve phase:\n");
+        M.print_matrix("M nullspace");
+        // M.print_matrix_summary("M nullspace ");
+        Nullspace.print_matrix("N nullspace");
+        // Nullspace.print_matrix_summary("N nullspace ");
+      }
+      
+      improve_solution(M, MN);
       
       // debug
-      if (result->log_debug)
+      if (result->log_debug_time)
       {
         time_opt = timer.cpu_secs();
         result->info_message("optimize quality time %f\n",time_opt);
       }
       // debug
       
-      fine_tune(M,N);
+      fine_tune(MN);
       
       // debug
-      if (result->log_debug)
+      if (result->log_debug_time)
       {
         time_tune = timer.cpu_secs();
         result->info_message("fine tune quality time %f\n",time_tune);
@@ -5100,13 +6251,40 @@ namespace IIA_Internal
       }
     }
     
-    if (result->log_debug)
+    if (result->log_debug_time)
     {
       double time_assign_tied = timer.cpu_secs();
       result->info_message("assign tied variable time %f\n",time_tune);
       result->info_message("total solve_sub time %f\n", time_rref + time_constrain + time_bound + time_opt + time_tune + time_assign_tied);
-      result->debug_message( "\n---- done solve_sub ----\n\n");
     }
+    result->debug_message( "\n---- done solve_sub ----\n\n");
+
+    // save M in nullspace to pass to parent
+    Nullspace = MatrixSparseInt(M,MaxMrow);
+    // re-insert tied-to variables
+    if (!tied_variables.empty())
+    {
+      for (int c=0; (size_t) c<tied_variables.size(); ++c)
+      {
+        if (tied_variables[c].size()>1)
+        {
+          for ( int r : Nullspace.col_rows[c] )
+          {
+            const int v = Nullspace.rows[r].get_val(c);
+            for ( int c2 : tied_variables[c] )
+            {
+              if (c2==c) continue;
+              Nullspace.rows[r].cols.push_back(c2);
+              Nullspace.rows[r].vals.push_back(v);
+              Nullspace.col_rows[c2].push_back(r);
+            }
+            Nullspace.rows[r].sort();
+          }
+        }
+      }
+      // Nullspace.fill_in_cols_from_rows(); // not needed
+    }
+    
     
     return true;
   }
@@ -5304,6 +6482,19 @@ namespace IIA_Internal
   {
     // debug
     result->info_message("Running incremental interval assignment.\n");
+    // what options were turned on
+    result->info_message("use HNF_always, HNF_goals, map_nullspace, best_improvement, better_rref_pivots, fixed_RatioR, "
+                         "smart_rounding, Ratio_for_improvement, flip_blocker_signs"
+                         " = %d%d%d%d%d%d%d%d%d\n",
+                         use_HNF_always,
+                         use_HNF_goals,
+                         use_map_nullspace,
+                         use_best_improvement,
+                         use_better_rref_step1_pivots_in_sumeven_phase,
+                         use_fixed_RatioR_straddle,
+                         use_smart_adjust_for_fractions,
+                         use_Ratio_for_improvement_queue,
+                         use_Nullspace_sumeven_to_flip_sign_of_blocker);
     
     CpuTimer total_timer;
     double setup_time=0, map_time(0.);
@@ -5349,10 +6540,10 @@ namespace IIA_Internal
       should_adjust_solution_tied_variables = false;
     }
 
-    if (result->log_debug)
+    if (result->log_debug_time)
     {
       setup_time = total_timer.cpu_secs();
-      result->debug_message("IIA setup time = %f\n", setup_time );
+      result->info_message("IIA setup time = %f\n", setup_time );
     }
     
     if (infeasible_constraints())
@@ -5369,11 +6560,15 @@ namespace IIA_Internal
     result->debug_message("Solving IIA mapping subproblems.\n");
     
     bool success = solve_phase(true, do_improve, new_row_min, new_row_max);
+      if (/* DISABLES CODE */ (0))
+    {
+      print_solution_summary("solution after mapping phase");
+    }
     
-    if (result->log_debug)
+    if (result->log_debug_time)
     {
       map_time = total_timer.cpu_secs();
-      result->debug_message("IIA mapping-phase solver time = %f\n", map_time );
+      result->info_message("IIA mapping-phase solver time = %f\n", map_time );
     }
     
     // if the mapping problems were feasible
@@ -5392,16 +6587,22 @@ namespace IIA_Internal
       solved_used_row = used_row;
       solved_used_col = used_col;
     }
+    else
+    {
+      hasBeenSolved=false;
+    }
     result->solved = success;
 
     // debug & diagnositcs
-    if (result->log_debug)
+    if (result->log_debug_time)
     {
       const double even_time = total_timer.cpu_secs();
-      result->debug_message("IIA sum-even-phase solver time = %f\n", even_time );
+      result->info_message("IIA sum-even-phase solver time = %f\n", even_time );
       const double total_time = setup_time+map_time+even_time;
-      result->debug_message("Total IIA solve time = %f\n", total_time);
-
+      result->info_message("Total IIA solve time = %f\n", total_time);
+    }
+    if (result->log_debug)
+    {
       print_problem("full problem solution");
       print_solution("full problem solution");
       // print_problem_summary("full problem solution");
@@ -5412,8 +6613,384 @@ namespace IIA_Internal
     return success;
   }
   
+  int RowSparseInt::dot(const RowSparseInt &b)
+  {
+    int d(0), i(0),j(0);
+    while (i<cols.size() && j<b.cols.size())
+    {
+      int r =   cols[i];
+      int s = b.cols[j];
+      // for cols in both rows
+      if (r < s)
+      {
+        ++i;
+      }
+      else if (r > s)
+        ++j;
+      else
+      {
+        d += vals[i] * b.vals[j];
+        ++i;
+        ++j;
+      }
+    }
+    return d;
+  }
+
+  // improvement since IMR paper
+  void IncrementalIntervalAssignment::transfer_parent_nullspace_to_subs(vector<IncrementalIntervalAssignment*> &sub_problems)
+  {
+    if (result->log_debug)
+    {
+      print_problem("parent");
+    }
+    
+    // make parent to sub column map, using sub to parent map
+    const size_t mapsize = used_col+1;
+    vector<IncrementalIntervalAssignment*> col_subproblem(mapsize,nullptr);
+    parentCols.assign(mapsize,-1);
+    for ( auto *sub_problem : sub_problems)
+    {
+      if (result->log_debug)
+      {
+        sub_problem->print_problem("sub_problem");
+      }
+      
+      for (int sc=0; sc < sub_problem->parentCols.size(); ++sc )
+      {
+        int pc = sub_problem->parentCols[sc];
+        if (pc>=0)
+        {
+          parentCols[ pc ] = sc;
+          col_subproblem[ pc ] = sub_problem;
+        }
+      }
+    }
+    
+    // gather relevant nullspace from this to sub problems
+    for (auto &prow : Nullspace.rows)
+    {
+      if (result->log_debug)
+      {
+        result->info_message("Converting parent nullspace ");
+        prow.print_row(result);
+      }
+
+      if (prow.cols.empty())
+        continue;
+      
+      // determine which subproblem, and verify *all* the columns are in that subproblem
+      IncrementalIntervalAssignment *sub_problem = col_subproblem[ prow.cols[0] ];
+      for (int pc : prow.cols)
+      {
+        if ( col_subproblem[pc] != sub_problem )
+        {
+          sub_problem = nullptr;
+          break;
+        }
+      }
+      if (sub_problem==nullptr)
+        continue;
+      
+      // convert from parent columns to sub_problem columns
+      RowSparseInt srow; // sub nullspace row
+      srow.vals = prow.vals;
+      for (auto pc : prow.cols)
+      {
+        int sc = parentCols[pc];
+        assert(sc>=0);
+        srow.cols.push_back(sc);
+      }
+      
+      // iterate over the sub_problem rows that have a variable in common with the nullspace row
+      set<int> subrows;
+      for (auto c : srow.cols)
+      {
+        subrows.insert( sub_problem->col_rows[c].begin(), sub_problem->col_rows[c].end() );
+      }
+      
+      // verify row is in the nullspace of the subproblem. If not, figure out the dummy variables that need to be added to it to make it in the nullspace.
+      
+      // a spanning set of nullspace vectors includes one entry for each row that has a non-trivial contribution.
+      // nullspace row = k_row * row + k_dummy * dummy_col
+      struct nullrowinfo
+      {
+        int k_row, k_dummy, dummy_col, c_dummy;
+        nullrowinfo() : k_row(0), k_dummy(0), dummy_col(-1), c_dummy(1) {}
+        nullrowinfo(int k_row_in, int k_dummy_in, int dummy_col_in, int c_dummy_in) : k_row(k_row_in), k_dummy(k_dummy_in), dummy_col(dummy_col_in), c_dummy(c_dummy_in) {}
+      };
+      map < int, vector<nullrowinfo> > nullrows;
+      bool ok(true);
+      
+      for (auto r : subrows) // sub constraint row
+      {
+        auto &row = sub_problem->rows[r];
+        
+        // calculate row-sum, plus gather any extra varibles in the subproblem row but not in the nullspace vector
+        vector<int> extra_cols;
+        int row_sum(0), i(0),j(0);
+        while (i<row.cols.size() && j<srow.cols.size())
+        {
+          int rc =  row.cols[i];
+          int sc = srow.cols[j];
+          // for cols in both rows
+          if (rc < sc)
+          {
+            extra_cols.push_back(rc);
+            ++i;
+          }
+          else if (rc > sc)
+            ++j;
+          else
+          {
+            row_sum += row.vals[i] * srow.vals[j];
+            ++i;
+            ++j;
+          }
+        }
+        while(i<row.cols.size())
+        {
+          extra_cols.push_back(row.cols[i]);
+          ++i;
+        }
+        
+        
+        // row_sum==0 means its already in the nullspace of that row. Leave nullrowinfo empty.
+        if (row_sum!=0)
+        {
+          auto &v = nullrows[r]; //creates
+                                 // for any extra col, if it is in just the one row, then we're good, we can make a nullspace row for the sub
+          for (auto dummy_col : extra_cols)
+          {
+            if (sub_problem->col_rows[dummy_col].size()==1)
+            {
+              // assert(col_rows[extra_cols[0]][0]) should be this row
+              int coeff = row.get_val(dummy_col);
+              int p = abs(lcm(coeff,row_sum));
+              
+              // ensure k_row > 0 for simpicity
+              if (row_sum < 0) p = -p;
+              int k_dummy =   -p / coeff;
+              int k_row   =    p / row_sum;
+              assert(k_row>0);
+              // nullspace row = k_row * row + k_dummy * dummy_col
+              v.emplace_back(nullrowinfo(k_row,k_dummy,dummy_col,coeff));
+            }
+          }
+          if (v.empty())
+          {
+            // failed, we can't make a nullspace row this way
+            ok = false;
+            break;
+          }
+        }
+      }
+      
+      // now build the nullspace vectors and verify
+      if (ok)
+      {
+        // use the "smallest" dummy variable for every row to make a nullspace vector
+        // there is probably a more sophisticated way to pick the one that has a small lcm, but try greedy for now.
+        // also calculate k_row, the overall multiple of the nullspace row to use
+        vector <int> ii;
+        int k_row=1;
+        for (auto &n : nullrows)
+        {
+          int min_i=0, min_kd=1, min_kk=k_row;
+          bool min_sign_agrees=false;
+          VarType min_var_type=UNKNOWN_VAR; // {INT_VAR, EVEN_VAR, DUMMY_VAR, UNKNOWN_VAR};
+          for (int i=0; i<n.second.size();++i)
+          {
+            const int ki = n.second[i].k_row;
+            const int kk = abs(lcm(k_row,ki));
+            const int kd = n.second[i].k_dummy;
+            const VarType ktype = col_type[ki]; // or should we be looking at the subproblem?
+
+            // selection criteria:
+            //   type sum-even var (this is the opposite of prefering small coefficient for multiplying row)
+            //   type dummy var
+            //   k_dummy is positve, dummy variable will increase with additions to the nullspace vector
+            //   small coefficient for multiplying row
+            //   small coefficient for multiplying k, i.e. kk
+            
+            // first time through, set min to the first entry
+            bool pick_i  = (i==0);
+            bool decided = (i==0);
+            
+            // prefer sum-even
+            if (!decided)
+            {
+              if (ktype==EVEN_VAR && min_var_type!=EVEN_VAR)
+              {
+                pick_i=true;
+                decided=true;
+              }
+              else if (ktype!=EVEN_VAR && min_var_type==EVEN_VAR)
+              {
+                pick_i=false;
+                decided=true;
+              }
+            }
+            // prefer dummy
+            if (!decided)
+            {
+              if (ktype==DUMMY_VAR && min_var_type!=DUMMY_VAR)
+              {
+                pick_i=true;
+                decided=true;
+              }
+              else if (ktype!=DUMMY_VAR && min_var_type==DUMMY_VAR)
+              {
+                pick_i=false;
+                decided=true;
+              }
+            }
+            // prefer coefficient sign
+            if (!decided)
+            {
+              // k_row was always set to be positive
+              // k_dummy, want it positive, too, as most dummy vars have a lower bound but no upper bound
+              bool sign_agrees = (kd>0);
+              if (sign_agrees && !min_sign_agrees)
+              {
+                pick_i = true;
+                decided = true;
+              }
+              else if (!sign_agrees && min_sign_agrees)
+              {
+                pick_i = false;
+                decided = true;
+              }
+            }
+            // prefer small coefficient for row, small coeff for k
+            if (!decided)
+            {
+              if (kk < min_kk || (kk==min_kk && abs(kd)<abs(min_kd)))
+              {
+                pick_i = true;
+              }
+              decided = true;
+            }
+            assert(decided);
+            if (pick_i)
+            {
+              min_i =i;
+              min_kk = kk;
+              min_kd = kd;
+              min_var_type = ktype;
+            }
+          }
+          k_row=min_kk;
+          ii.push_back(min_i);
+        }
+        
+        // generate the subproblem nullspace row
+        auto nrow = srow;
+        nrow.multiply(k_row);
+        
+        // gather the dummy vars
+        {
+          int i=0;
+          for (auto &n : nullrows)
+          {
+            auto &nd = n.second[ii[i]];
+            nrow.cols.push_back( nd.dummy_col );
+            const int k = k_row / nd.k_row;
+            nrow.vals.push_back( k * nd.k_dummy );
+            ++i;
+          }
+        }
+        nrow.sort();
+        row_simplify_vals(nrow.vals);
+        
+        if (result->log_debug)
+        {
+          result->info_message("Subproblem nullspace ");
+          nrow.print_row(result);
+        }
+        
+        // debug, double-check that the rowsum is now zero
+        if (1)
+        {
+          for (auto r : subrows) // sub constraint row
+          {
+            auto &row = sub_problem->rows[r];
+            auto row_sum = row.dot(nrow);
+            
+            if (result->log_debug)
+            {
+              result->debug_message("row %d row_sum=%d, ",r,row_sum);
+              row.print_row(result);
+            }
+            assert(row_sum==0);
+          }
+        }
+        
+        sub_problem->Nullspace.push_row(nrow);
+        
+        // For each of the rows that had multiple isolated vars, generate a nullspace row for the pairs of one of those vars and the one we chose for above
+        //   but only if both of those vars are dummy vars. We catch the INT_VARs compbinations already through the parent nullspace
+        {
+          int i=0;
+          for (auto &n : nullrows)
+          {
+            if (n.second.size()>1)
+            {
+              // jj is one of the nullspace indices
+              const int jj = ii[i];
+              if (col_type[jj] == INT_VAR) continue;
+              
+              for (int j=0; j<n.second.size(); ++j)
+              {
+                if (j==jj) continue;
+                if (col_type[j] == INT_VAR) continue;
+
+                // make nullspace using n.second[j] and n.second[jj]
+                auto cj  = n.second[ j].c_dummy;
+                auto cjj = n.second[jj].c_dummy;
+
+                auto k = lcm(cj,cjj);
+                auto nj  =  k / cj;
+                auto njj = -k / cjj;
+
+                auto dj  = n.second[ j].dummy_col;
+                auto djj = n.second[jj].dummy_col;
+
+                RowSparseInt nn({dj,djj}, {nj,njj});
+                nn.sort();
+                row_simplify_vals(nn.vals);
+
+                if (result->log_debug)
+                {
+                  result->info_message("Subproblem nullspace isolated pair ");
+                  nn.print_row(result);
+                }
+
+                sub_problem->Nullspace.push_row(nn);
+              }
+            }
+            ++i;
+          }
+        }
+      } // ok
+    }
+    // gather relevant nullspace from this to sub problems
+    
+    // debug subproblem nullspaces
+    if (result->log_debug)
+    {
+      for ( auto *sub_problem : sub_problems)
+      {
+        //sub_problem->print_problem("sub_problem");
+        get_result()->info_message("sub_problem nullspace from parent");
+        sub_problem->Nullspace.print_matrix();
+      }
+    }
+  }
+
+
   
-  bool IncrementalIntervalAssignment::solve_phase(bool map_only_phase, bool do_improve, int row_min, int row_max )
+  bool IncrementalIntervalAssignment::solve_phase(bool map_only_phase, bool do_improve, int row_min, int row_max)
   {
     if (result->log_debug)
     {
@@ -5424,10 +7001,26 @@ namespace IIA_Internal
       print_problem("\nEntire Interval Problem");
     }
     
+    // hack for test_problem_augmented_nullspace_demo zzyk
+      if (/* DISABLES CODE */ (0) && !map_only_phase)
+    {
+      col_solution[0]=4;
+      col_solution[1]=4;
+      col_solution[2]=4;
+      col_solution[3]=5;
+    }
+
     // subdivide problems into independent components
     vector<IncrementalIntervalAssignment*> sub_problems;
-    subdivide_problem( sub_problems, !map_only_phase, row_min, row_max  );
+    vector<int> orphan_cols;
+    subdivide_problem( sub_problems, orphan_cols, !map_only_phase, row_min, row_max  );
     const auto num_subs = sub_problems.size();
+
+    // copy and fix nullspaces from parent to sub
+    if (!map_only_phase)
+    {
+      transfer_parent_nullspace_to_subs(sub_problems);
+    }
 
     // timing
     double solve_time=0.;
@@ -5447,27 +7040,35 @@ namespace IIA_Internal
       // In the second phase, for variables that have not been assigned anything, assign goals.
       //   This happens for a single paving face, where the variables were not in any mapping subproblem and so are uninitialized
       if (!map_only_phase)
+      {
         sub_problem->assign_vars_goals(false);
-
-      if (!sub_problem->solve_sub(do_improve))
+      }
+      
+      if (!sub_problem->solve_sub(do_improve,map_only_phase))
       {
         success = false;
         result->warning_message("Subproblem %d of %d was infeasible.\n", i+1, num_subs );
       }
       
       // timing
-      if (result->log_debug)
+      if (result->log_debug_time)
       {
         const auto solve_sub_time=solve_timer.cpu_secs();
         solve_time+=solve_sub_time;
         result->info_message("Subproblem %d of %d size %d X %d time = %f (%f total)\n\n",
                              i+1, num_subs, sub_problem->used_row+1, sub_problem->used_col+1, solve_sub_time, solve_time);
       }
+      else if (result->log_debug)
+      {
+        result->info_message("Subproblem %d of %d size %d X %d done\n\n",
+                             i+1, num_subs, sub_problem->used_row+1, sub_problem->used_col+1);
+      }
+
     }
 
     // gather sub-problem soutions back into this problem, copy solution to permanent storage
     if ( success )
-      gather_solutions( sub_problems );
+      gather_solutions( sub_problems, use_map_nullspace && map_only_phase, orphan_cols );
     delete_subproblems( sub_problems );
     
     return success;
@@ -5666,7 +7267,7 @@ namespace IIA_Internal
   
   void IncrementalIntervalAssignment::print_solution_col(int c) const
   {
-    result->info_message("  x%d col = %d", c, col_solution[c]);
+    result->info_message("  x%d = %d", c, col_solution[c]);
     if (has_tied_variables && tied_variables[c].size()==1)
     {
       const auto c2 = tied_variables[c].front();
@@ -5734,7 +7335,7 @@ namespace IIA_Internal
     print_problem("");
   }
   
-  bool IncrementalIntervalAssignment::tiny_subspace(int c, MatrixSparseInt &M)
+  bool IncrementalIntervalAssignment::tiny_subspace(int c, MatrixSparseInt &M, MatrixSparseInt &MN)
   {
     if (col_rows[c].empty())
       return false;
@@ -5788,9 +7389,11 @@ namespace IIA_Internal
         const auto worked = tiny_problem->create_nullspace(t_cols_dep, t_cols_ind, t_rows_dep, tM, tMaxMrow);
         if ( worked && tMaxMrow > 0)
         {
-          tiny_problem->cull_nullspace_tied_variables(tM, tMaxMrow);
+          tiny_problem->cull_nullspace_tied_variable_rows(tM, tMaxMrow);
 
-          // try rows of tM that contain c
+          // zzyk todo: we need to check whether any of the rows of tM actually contain c.
+          // If not, we need to keep going. If so, we should only save those rows, not all of them!
+          
           // convert tM to space of original matrix
           for (int tr = 0; tr < tMaxMrow; ++tr)
           {
@@ -5802,6 +7405,7 @@ namespace IIA_Internal
             }
             prow.vals = trow.vals;
             M.push_row(prow);
+            MN.push_row(prow);
           }
           delete tiny_problem;
           return true; // it worked, try these
@@ -5854,7 +7458,7 @@ namespace IIA_Internal
           //   smaller than the minimum number of intervals implied by the sum-even variable lower bound.
           // Probably a better solution is to just place a lower-bound on the intervals for individual edges, e.g. when one curve is the whole loop.
           // Checking small loops slows down the mapping phase solution, but can make a difference in improving quality.
-          if (!do_add)
+          if (!do_add) // && 0 to zzyk disable small loop checking
           {
             int min_edge_count=0;
             int expected_edge_count=0;
@@ -5929,6 +7533,10 @@ namespace IIA_Internal
     
     sub_problem->parentCols = sub_cols;
     sub_problem->parentRows = sub_rows;
+    
+    sub_problem->Nullspace.rows.clear();
+    sub_problem->Nullspace.col_rows.clear();
+    sub_problem->Nullspace.col_rows.resize(sub_problem->number_of_cols);
 
     // uses the parentCols
     copy_bounds_to_sub( sub_problem );
@@ -5938,6 +7546,7 @@ namespace IIA_Internal
   }
   
   void IncrementalIntervalAssignment::subdivide_problem(vector<IncrementalIntervalAssignment*> &sub_problems,
+                                                        vector<int> &orphan_cols,
                                                         bool do_sum_even, int row_min, int row_max )
   {
     // debug
@@ -5961,7 +7570,11 @@ namespace IIA_Internal
     {
       
       // if column not already in a subproblem
-      if ( seen_columns[e] == 0 && (do_sum_even || col_type[e]==INT_VAR) )
+      // mapping phase: gather everything connected to an int var that isn't in a sum-even row
+      // sum_even_phase: gather everything connected to dummy var
+      if ( seen_columns[e] == 0 &&
+          ((!do_sum_even && col_type[e]==INT_VAR) ||
+           ( do_sum_even && col_type[e]==EVEN_VAR) ) )
       {
         
         // gather data for new subproblem
@@ -5972,7 +7585,10 @@ namespace IIA_Internal
         recursively_add_edge( e, do_sum_even, sub_rows, sub_cols, sub_row_array, sub_col_array );
         
         if (sub_rows.empty())
+        {
+          orphan_cols.push_back(e);
           continue;
+        }
         
         sort(sub_rows.begin(),sub_rows.end());
         sort(sub_cols.begin(),sub_cols.end());
@@ -6020,11 +7636,14 @@ namespace IIA_Internal
         
       }
     }
-    if (result->log_debug)
+    if (result->log_debug_time)
     {
       const auto subdivide_time = subdivide_timer.cpu_secs();
-      // result->info_message("\nDivided into %d subproblems.\n\n",sub_problems.size());
-      result->debug_message("\nDivided into %d subproblems in time = %f\n\n", (int) sub_problems.size(), subdivide_time);
+      result->info_message("\nDivided into %d subproblems in time = %f\n\n", (int) sub_problems.size(), subdivide_time);
+    }
+    else if (result->log_debug)
+    {
+      result->debug_message("\nDivided into %d subproblems.\n\n", (int) sub_problems.size());
     }
   }
   
@@ -6037,9 +7656,16 @@ namespace IIA_Internal
     sub_problems.clear();
   }
   
-  void IncrementalIntervalAssignment::gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems )
+  void IncrementalIntervalAssignment::gather_solutions( vector<IncrementalIntervalAssignment*> &sub_problems,
+                                                       bool want_sub_nullspaces, vector<int> &orphan_cols )
   {
-    for (auto sub : sub_problems)
+    if (want_sub_nullspaces)
+    {
+      Nullspace.rows.clear();
+      Nullspace.col_rows.clear();
+      Nullspace.col_rows.resize(number_of_cols);
+    }
+    for (auto *sub : sub_problems)
     {
       assert(sub->parentProblem == this);
       if ( !sub->get_is_solved() )
@@ -6052,8 +7678,86 @@ namespace IIA_Internal
         assert( c >= 0 && c < number_of_cols );
         col_solution[ c ] = sub->col_solution[e];
       }
+
+      // copy the nullspace into the parent nullspace
+      if (want_sub_nullspaces)
+      {
+        auto &sub_nullspace = sub->Nullspace;
+
+        // debug
+        if (result->log_debug)
+        {
+          result->info_message("sub nullspace, with tied variables");
+          sub_nullspace.print_matrix();
+        }
+        // convert sub_problem nullspace to parent nullspace variables.
+        for (auto &row : sub_nullspace.rows)
+        {
+          RowSparseInt prow;
+          prow.vals = row.vals;
+          for (auto c : row.cols)
+          {
+            prow.cols.push_back(sub->parentCols[c]);
+          }
+//          // tied variables were already put back into the sub-problem, so the above loop already took care of it
+//          if (sub->has_tied_variables)
+//          {
+//            const auto old_size = prow.cols.size();
+//            for (int i=0; i<row.cols.size();++i)
+//            {
+//              const int c = row.cols[i];
+//              const int v = row.vals[i];
+//              for (int j=1; j<sub->tied_variables[c].size();++j)
+//              {
+//                int cc = sub->tied_variables[c][j];
+//                prow.cols.push_back(sub->parentCols[cc]);
+//                prow.vals.push_back(v);
+//              }
+//            }
+//            // no need to sort if we didn't append any tied variables
+//            if (old_size<prow.cols.size())
+//              prow.sort();
+//          }
+          Nullspace.push_row(prow);
+        }
+        
+        // debug
+        if (result->log_debug)
+        {
+          Nullspace.print_matrix("parent nullspace after gathering subproblem nullspaces");
+        }
+      }
     }
-    delete_subproblems( sub_problems );
+    auto num_gathered_nullrows = Nullspace.rows.size();
+    
+    // find elementary nullspace vectors of interval variables what weren't in any subproblem
+    // e.g., two paving surfaces sharing a curve, or a curve just in one paving surface and nowhere else
+    if (want_sub_nullspaces)
+    {
+      for (auto c : orphan_cols)
+      {
+        if (col_type[c]==INT_VAR) // skip sum-even and dummy variables, we find nullspace vectors for those later
+        {
+          Nullspace.push_row( RowSparseInt( {c}, {1} ) );
+        }
+      }
+      // debug
+      if (result->log_debug)
+      {
+        result->debug_message("parent nullspace after appending %d orphan variables", (int) orphan_cols.size());
+        Nullspace.print_matrix();
+      }
+    }
+    auto num_elementary_nullrows = Nullspace.rows.size() - num_gathered_nullrows;
+
+    if (result->log_debug)
+    {
+      if (want_sub_nullspaces)
+        result->info_message("%lu parent nullspace rows: %lu from %lu subproblem nullspaces and %lu from elementary rows.\n",
+                             Nullspace.rows.size(), num_gathered_nullrows, sub_problems.size(), num_elementary_nullrows);
+      else
+        result->info_message("Did not want sub nullspaces\n");
+    }
   }
   
   
@@ -6259,6 +7963,208 @@ namespace IIA_Internal
     target->lastCopiedCol    = lastCopiedCol;
     
     // don't do anything with result
+  }
+  
+  char letter_diff(const QElement &qe1, const QElement &qe2, double &v1, double &v2)
+  {
+    if (qe1.valueA!=qe2.valueA) {v1=qe1.valueA; v2=qe2.valueA; return 'A';}
+    if (qe1.valueB!=qe2.valueB) {v1=qe1.valueB; v2=qe2.valueB; return 'B';}
+    if (qe1.valueC!=qe2.valueC) {v1=qe1.valueC; v2=qe2.valueC; return 'C';}
+    /*  all three same, use A*/ {v1=qe1.valueA; v2=qe2.valueA; return '=';}
+  }
+  
+  int IncrementalIntervalAssignment::is_better( vector<QElement> &qA, vector<QElement> &qB ) const
+  {
+    // 1 if A<B by lexicographic min max
+    //   1 if A[i]<B[i] for some i and A[j]<=B[j] for all j>i
+    
+    assert(qA.size()==qB.size());
+    if (qA.empty())
+      return 0;
+    
+    // start at back, largest element
+    for (int i = ((int) qA.size())-1; i>=0; --i)
+    {
+      if (qA[i] < qB[i])
+      {
+        if (result->log_debug)
+        {
+          double vA, vB;
+          auto c = letter_diff(qA[i], qB[i], vA, vB);
+          const int max_place = ((int) qA.size())-1;
+          const int place = max_place-i;
+          result->debug_message("X<Y value%c %7.5g < %7.5g at place %d of %d, for X:x%d and Y:x%d\n", c, vA, vB, place, max_place, qA[i].c, qB[i].c );
+        }
+        return 1;
+      }
+      else if (qB[i] < qA[i])
+      {
+        if (result->log_debug)
+        {
+          double vA, vB;
+          auto c = letter_diff(qA[i], qB[i], vA, vB);
+          const int max_place = ((int) qA.size())-1;
+          const int place = max_place-i;
+          result->debug_message("X>Y value%c %7.5g > %7.5g at place %d of %d, for X:x%d and Y:x%d\n", c, vA, vB, place, max_place, qA[i].c, qB[i].c );
+        }
+        return -1;
+      }
+    }
+    // every element was equal
+    return 0;
+  }
+
+  int truncate_trailing_zeros( vector<double> &R )
+  {
+    size_t i=0;
+    for( ; i<R.size() && R[i]>0.; ++i ) {}
+    auto R_trailing_zeros = R.size()-i;
+    R.resize(i);
+    return (int) R_trailing_zeros;
+  }
+
+  int IncrementalIntervalAssignment::solution_is_better_than_Y(vector<int> &Y,
+                                                               bool print_summary, bool print_detail )
+  {
+    return solution_X_is_better_than_Y( col_solution, Y, print_summary, print_detail);
+  }
+  int IncrementalIntervalAssignment::solution_X_is_better_than_Y(vector<int> &X, vector<int> &Y,
+                                                                 bool print_summary, bool print_detail )
+  {
+    // compute R for X and Y
+    // sort by increasing R
+    // see which is lexicographically better
+
+    // number of columns, safe, min
+    int nc = std::min( {num_cols(), (int)X.size(), (int)Y.size()} );
+    std::vector<int> cols0n(nc);
+    std::iota(cols0n.begin(), cols0n.end(), 0);
+
+    vector<QElement> qX, qY;
+    qX.reserve(nc);
+    qY.reserve(nc);
+
+    // X
+    col_solution.swap(X);
+    compute_quality_ratio(qX,cols0n);
+    col_solution.swap(X);
+
+    // Y
+    col_solution.swap(Y);
+    compute_quality_ratio(qY,cols0n);
+    col_solution.swap(Y);
+
+    // lex compare
+    // set valuesB to 0, since that just has to do with the goals
+    // no need to re-sort, as valuesB is just a tiebreaker
+    for (auto &q : qX)
+    {
+      q.valueB = 0.;
+      q.valueC = 0.;
+    }
+    for (auto &q : qY)
+    {
+      q.valueB = 0.;
+      q.valueC = 0.;
+    }
+    auto old_debug = result->log_debug;
+    if (print_summary)
+    {
+      result->log_debug=true;
+    }
+    auto rc = is_better(qX,qY);
+    
+    // print which was better
+    if (print_summary)
+    {
+      if (rc==1)
+      {
+        result->info_message("solution R(X) < R(Y)\n");
+      }
+      else if (rc==-1)
+      {
+        result->info_message("solution R(X) > R(Y)\n");
+      }
+      else
+      {
+        assert(rc==0);
+        result->info_message("solution R(X) == R(Y)\n");
+      }
+    }
+    // print actual values of X,Y, qX, qY
+    if (print_detail)
+    {
+      result->info_message("X: ");
+      print_vec(result,X);
+      result->info_message("Y: ");
+      print_vec(result,Y);
+
+      // largest to smallest
+      vector<double> RX(nc,0), RY(nc,0);
+      int i=nc;
+      for (auto qe : qX)
+      {
+        RX[--i] = qe.valueA;
+      }
+      i=nc;
+      for (auto qe : qY)
+      {
+        RY[--i] = qe.valueA;
+      }
+      
+      // truncate tailing zeros to avoid printing them.
+      int X_trailing_zeros = truncate_trailing_zeros( RX );
+      int Y_trailing_zeros = truncate_trailing_zeros( RY );
+
+      result->info_message("valuesA, largest to smallest.\n");
+      result->info_message("R(X): ");
+      print_vec(result,RX,false);
+      if (X_trailing_zeros)
+        result->info_message(" ... and %d trailing zeros", X_trailing_zeros);
+      result->info_message("\n");
+      result->info_message("R(Y): ");
+      print_vec(result,RY,false);
+      if (Y_trailing_zeros)
+        result->info_message(" ... and %d trailing zeros", Y_trailing_zeros);
+      result->info_message("\n");
+
+    }
+    result->log_debug=old_debug;
+    return rc;
+  }
+
+  // zzyk, hack put this here for fast recompile
+  IncrementalIntervalAssignment::IncrementalIntervalAssignment( IAResultImplementation *result_ptr ) : MatrixSparseInt(result_ptr), Nullspace(result_ptr)
+  {
+    // all on
+    if (1)
+    {
+      use_HNF_always = false; // false then try rref solution first
+      use_HNF_goals = true;  // false c=1
+      use_map_nullspace = true; // false use M only during sum-even phase
+      use_best_improvement = true; // false use first improvement vector
+      
+      use_better_rref_step1_pivots_in_sumeven_phase = true; // Default true. If false, use the same pivot rules as in the mapping phase
+      use_fixed_RatioR_straddle = true; // Default true. If false, reintroduce a bug for calculating RatioR for solutions less than 1 away from goals.
+      use_smart_adjust_for_fractions = true; // Default true. If false, then we always round upwards
+      use_Ratio_for_improvement_queue = true; // Default true. If false, then use RatioR for selecting which variable
+      use_Nullspace_sumeven_to_flip_sign_of_blocker = true; // Default true. If true, then when trying to increase x0, if "x0 - x1" is blocked by x1, then add a "2x1 + y" Nullspace row to flip the sign of x1
+    }
+
+    // all off
+    if (/* DISABLES CODE */ (0))
+    {
+      use_HNF_always = false; // false then try rref solution first
+      use_HNF_goals = false;  // false c=1
+      use_map_nullspace = false; // false use M only during sum-even phase
+      use_best_improvement = false; // false use first improvement vector
+      
+      use_better_rref_step1_pivots_in_sumeven_phase = false; // Default true. If false, use the same pivot rules as in the mapping phase
+      use_fixed_RatioR_straddle = false; // Default true. If false, reintroduce a bug for calculating RatioR for solutions less than 1 away from goals.
+      use_smart_adjust_for_fractions = false; // Default true. If false, then we always round upwards
+      use_Ratio_for_improvement_queue = false; // Default true. If false, then use RatioR for selecting which variable
+      use_Nullspace_sumeven_to_flip_sign_of_blocker = false; // Default true. If true, then when trying to increase x0, if "x0 - x1" is blocked by x1, then add a "2x1 + y" Nullspace row to flip the sign of x1
+    }
   }
 
 } // namespace

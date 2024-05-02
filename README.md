@@ -43,6 +43,18 @@ IIA is C++11 and has *no* dependencies.
 IA.h is the interface.
 The driver code test.cpp gives examples of setting up and solving the problem.
 
+== Versions / Branches
+
+master 
+branch contains the version for the 2022-2023 CAD Journal [IIA-journal], that commit tagged as "research-pave"
+this is the version with the best output and runtime
+
+imr2021
+branch contains the version at the time the 2021 IMR [IIA] paper was written.
+
+The Test directory and Source/test.cpp are not needed for using the code as a library.
+
+To run the tests mentioned in these papers, modify test.cpp to include one or more of the cpp files in the Test directory.
 
 == Acknowledgements
 
@@ -54,7 +66,7 @@ The predecessors to this code include BBIA, a linear-programming plus branch-and
 == Bibliography
 
 [BBIA]
-  "High Fidelity Interval Assignment," Scott A. Mitchell, Proc. 6th International Meshing Roundtable `97, 33-44 (1997), and
+  "High Fidelity Interval Assignment," Scott A. Mitchell, Proc. 6th International Meshing Roundtable, 33-44 (1997), and
 International Journal of Computational Geometry and Applications, Vol. 10, No. 4 (2000) 399-415.
 
 [NLIA] 
@@ -67,7 +79,14 @@ International Journal of Computational Geometry and Applications, Vol. 10, No. 4
   "Incremental Interval Assignment (IIA) for Scalable Mesh Preparation," Scott A. Mitchell, Sandia National Laboratories technical report SAND2019-11163R, LDRD 19-1050, 2019.
 
 [IIA]
-  "Interval Assignment by Integer Linear Algebra," Scott A. Mitchell, in preparation.
+  "Incremental Interval Assignment by Integer Linear Algebra,"
+  Scott A. Mitchell, International Meshing Roundtable,
+  2021, volume 29, pages 18.
+
+[IIA-journal]
+  "Interval Assignment by Integer Linear Algebra with Improvements," 
+  Scott A. Mitchell, Computer Aided Design, 
+  in preparation.
 
 
 == IIA Design Background 

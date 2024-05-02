@@ -1,3 +1,18 @@
+to do, using sub-nullspaces, June 2022
+
+Use mapping nullspace to get more local sum-even nullspace vecs
+  IIRC issue was nullspace becomes too large, but it worked
+  double-check that we're not doing RREF and HNF when we already have the nullspace.
+Test timing, robustness  
+Find the problem that was motivating this approach, test it.
+
+
+HNF initial value, add goal as another row when doing column-ops to reduce, should give us the goal of the final variable
+
+
+do something to discover symmetry and solve if efficiently, either by breaking symmetry or recognizing when things are equivalent
+
+
 to do (x = done)
  x move freeze_problem_size to start of solve, depending on whether solving for the first time or not
  x CUBIT_TRUE, CUBIT_FALSE to true and false
