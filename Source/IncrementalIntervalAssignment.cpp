@@ -6712,12 +6712,12 @@ namespace IIA_Internal
       // verify row is in the nullspace of the subproblem. If not, figure out the dummy variables that need to be added to it to make it in the nullspace.
       
       // a spanning set of nullspace vectors includes one entry for each row that has a non-trivial contribution.
-      // nullspace row = k_row * row + k_dummy * dummy_col
-      struct nullrowinfo
-      {
-        int k_row, k_dummy, dummy_col, c_dummy;
-        nullrowinfo() : k_row(0), k_dummy(0), dummy_col(-1), c_dummy(1) {}
-        nullrowinfo(int k_row_in, int k_dummy_in, int dummy_col_in, int c_dummy_in) : k_row(k_row_in), k_dummy(k_dummy_in), dummy_col(dummy_col_in), c_dummy(c_dummy_in) {}
+      // nullspace row = k_row * row + k_dummy * dummy_col  // where coeff_dummy is the coefficient of the dummy var in the sub_problem matrix, not in its nullspace
+       struct nullrowinfo
+       {
+         int k_row, k_dummy, dummy_col, coeff_dummy;
+         nullrowinfo() : k_row(0), k_dummy(0), dummy_col(-1), coeff_dummy(1) {}
+         nullrowinfo(int k_row_in, int k_dummy_in, int dummy_col_in, int coeff_dummy_in) : k_row(k_row_in), k_dummy(k_dummy_in), dummy_col(dummy_col_in), coeff_dummy(coeff_dummy_in) {}
       };
       map < int, vector<nullrowinfo> > nullrows;
       bool ok(true);
@@ -6801,10 +6801,11 @@ namespace IIA_Internal
           VarType min_var_type=UNKNOWN_VAR; // {INT_VAR, EVEN_VAR, DUMMY_VAR, UNKNOWN_VAR};
           for (int i=0; i<n.second.size();++i)
           {
-            const int ki = n.second[i].k_row;
-            const int kk = abs(lcm(k_row,ki));
-            const int kd = n.second[i].k_dummy;
-            const VarType ktype = col_type[ki]; // or should we be looking at the subproblem?
+            auto &ni = n.second[i]; // alias
+            const int kni = ni.k_row;
+            const int kk = abs(lcm(k_row,kni));
+            const int kd = ni.k_dummy;
+            const VarType ktype = sub_problem->col_type[ni.dummy_col]; 
 
             // selection criteria:
             //   type sum-even var (this is the opposite of prefering small coefficient for multiplying row)
@@ -6946,8 +6947,8 @@ namespace IIA_Internal
                 if (col_type[j] == INT_VAR) continue;
 
                 // make nullspace using n.second[j] and n.second[jj]
-                auto cj  = n.second[ j].c_dummy;
-                auto cjj = n.second[jj].c_dummy;
+                auto cj  = n.second[ j].coeff_dummy;
+                auto cjj = n.second[jj].coeff_dummy;
 
                 auto k = lcm(cj,cjj);
                 auto nj  =  k / cj;
