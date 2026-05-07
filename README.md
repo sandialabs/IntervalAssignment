@@ -1,4 +1,4 @@
-IntervalAssignment 
+# IntervalAssignment 
 GitHub repository
 https://github.com/samitch/IntervalAssignment.git 
 
@@ -6,7 +6,7 @@ IIA, Incremental Interval Assignment by Integer Linear Algebra, is a solver for 
 IIA was developed for the application of deciding the number of mesh edges on model curves (intervals) for quad and hex meshing. Meshing schemes impose constraints, ranging from the mild requirement that any quad mesh must have an even number of edges on its boundary, to structured mapped patches where opposite sides of a rectangle must have exactly equal numbers of edges.
 
 
-== Problem & Solution
+## Problem & Solution
 
 The Interval Assignment (IA) problem that IIA solves is
 
@@ -24,18 +24,20 @@ Note all variables may be set to "don't care," in which case IIA just solves the
 
 IIA is a discrete algorithm based on sparse integer linear algebra, variants of Gaussian elimination. The only floating point computations involve g, which is used in defining downhill directions and the lexicographic order.
 
-IIA process outline
+### IIA process outline
+
 0. convert <= and "sum-is-even" constraints to equality = using slack variables. (robust)
 1. solve Ax = b using Hermite Normal Form (HNF) to find x1. (robust)
 2. solve Ax = 0 using Reduced Row Echelon Form (RREF) to find vectors N spanning the nullspace of A. (robust)
 3. solve x in [lo,hi] by adding linear combinations of N to x1, in downhill directions, to find x3. (can fail)
 4. min lex f(x) by adding linear combinations of N to x3, in downhill directions constrained by [lo,hi], to output x4. (can fail)
+
 Steps 1-4 are performed over (semi) independent subproblems and recombined for the global solution.
 
 The main source of non-robustness is finding linear combinations of N that point in downhill directions. The heuristic is based on Gaussian elimination to avoid uphill directions. We save uphill directions found in previous searches, and the search is not exhaustive. This keeps running time low (sub-exponential) but can cause the algorithm to terminate with a sub-optimal solution, and possibly one that does not satisfy x in [lo,hi].
 
 
-== Why Use It?
+## Why Use It?
 
 The benefits of IIA are speed and always producing an integer solution. The drawback is the potential for the bounds to be unsatisfied or the solution to be sub-optimal. Example serial runtime is 0.2 seconds for matrix A sized 2000 x 2000 with about 4000 non-zeros. This is phenomenally fast for an Ax=b integer problem. In contrast, a predecessor code (BBIA) based on linear programming and branch and bound solves the same example problem in 20 minutes, 6000x slower.
 
@@ -43,7 +45,7 @@ IIA is C++11 and has *no* dependencies.
 IA.h is the interface.
 The driver code test.cpp gives examples of setting up and solving the problem.
 
-== Versions / Branches
+## Versions / Branches
 
 master 
 branch contains the version for the 2022-2023 CAD Journal [IIA-journal], that commit tagged as "research-pave"
@@ -56,14 +58,14 @@ The Test directory and Source/test.cpp are not needed for using the code as a li
 
 To run the tests mentioned in these papers, modify test.cpp to include one or more of the cpp files in the Test directory.
 
-== Acknowledgements
+## Acknowledgements
 
 The predecessors to this code include BBIA, a linear-programming plus branch-and-bound solver, implemented in Cubit in 1995--1997 by Scott A. Mitchell and maintained ever since (2020+) by the Cubit team [BBIA]. Another predecessor code by Scott A. Mitchell is NLIA, a non-linear programming based approach that attempted to reduce (but not eliminate) the need for branch and bound [NLIA]. A direct progenitor is MSIIA, a version developed for the simpler context of refining or coarsening an existing hex mesh in a semi-structured way [MSIIA, MSIIA LDRD]. This code (IIA) was developed in Cubit, then extracted to become this library-like standalone.
 
 "I" is the IIA author, Scott A. Mitchell. I thank Jason Shepherd, Robert Kerr, Michael Plooster, and Clinton Stimpson for their work on BBIA, and the related work of defining what constraints and goals should be sent to the solver. I thank Clinton Stimpson for his work on the infrastructure related to the Cubit version of IIA. I thank Timothy Tautges for prioritizing the interval assignment problem and supporting the work of both BBIA and NLIA. I thank Matthew Staten for supporting and inspiring MSIIA, which was the genesis for me thinking IIA might be a viable approach for the general problem. I thank Roshan Quadros, Michael Parks, and Michael Skroch for suporting the development of IIA. I thank Roshan Quadros, Trevor Hensley, and Salome Thorson for faciliating discussions with Cubit users  Jacquelyn Rae Moore, Neal Grieb, and others, to help determine desirable constraints, bounds and options. I thank David White for his work on autoscheme, the problem of deciding which meshing scheme (algorithm) to use for individual surfaces and volumes, and for using interval assignment to determine if a scheme is feasible. I thank Paul Stallings and Byron Hanks for discussion on how to define a clean interface to IIA. To the best of my knowledge there are no other authors of IIA besides Scott A. Mitchell, with the exception of some generic infrastructure from Cubit developed by the people mentioned in this acknowledgement.
 
 
-== Bibliography
+## Bibliography
 
 [BBIA]
   "High Fidelity Interval Assignment," Scott A. Mitchell, Proc. 6th International Meshing Roundtable, 33-44 (1997), and
@@ -89,7 +91,7 @@ International Journal of Computational Geometry and Applications, Vol. 10, No. 4
   in preparation.
 
 
-== IIA Design Background 
+## IIA Design Background 
 
 The following online lecture notes and discussions were helpful in designing IIA 
 
